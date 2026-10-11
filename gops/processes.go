@@ -39,9 +39,18 @@ type processCursorWire struct {
 	PIDs         []int32 `json:"pid"`
 	CPUMillis    []int64 `json:"cpu"`
 	OffsetMillis []int64 `json:"dt"`
+
+	GPUMillis int64    `json:"gt,omitempty"`
+	GPUPIDs   []int32  `json:"gp,omitempty"`
+	GPUKeys   []string `json:"gk,omitempty"`
+	GPUValues []uint64 `json:"gv,omitempty"`
 }
 
 func encodeProcessCursor(entries []models.ProcessCursorData) string {
+	return encodeProcessCursorWithGPU(entries, 0, nil)
+}
+
+func encodeProcessCursorWithGPU(entries []models.ProcessCursorData, gpuMillis int64, gpuCounters map[int32]map[string]uint64) string {
 	wire := processCursorWire{
 		PIDs:         make([]int32, 0, len(entries)),
 		CPUMillis:    make([]int64, 0, len(entries)),
@@ -57,6 +66,16 @@ func encodeProcessCursor(entries []models.ProcessCursorData) string {
 		wire.CPUMillis = append(wire.CPUMillis, int64(math.Round(e.Ticks*1000)))
 		wire.OffsetMillis = append(wire.OffsetMillis, e.Timestamp-wire.BaseMillis)
 	}
+	if len(gpuCounters) > 0 {
+		wire.GPUMillis = gpuMillis
+		for pid, counters := range gpuCounters {
+			for key, value := range counters {
+				wire.GPUPIDs = append(wire.GPUPIDs, pid)
+				wire.GPUKeys = append(wire.GPUKeys, key)
+				wire.GPUValues = append(wire.GPUValues, value)
+			}
+		}
+	}
 
 	raw, _ := json.Marshal(wire)
 	var buf bytes.Buffer
@@ -68,27 +87,32 @@ func encodeProcessCursor(entries []models.ProcessCursorData) string {
 	return base64.RawURLEncoding.EncodeToString(buf.Bytes())
 }
 
-func decodeProcessCursor(cursor string) map[int32]*models.ProcessCursorData {
-	out := make(map[int32]*models.ProcessCursorData)
+func decodeProcessCursorWire(cursor string) (processCursorWire, bool) {
+	var wire processCursorWire
 	raw, err := base64.RawURLEncoding.DecodeString(cursor)
 	if err != nil || len(raw) == 0 {
-		return out
+		return wire, false
 	}
 
 	gz, err := gzip.NewReader(bytes.NewReader(raw))
 	if err != nil {
-		return out
+		return wire, false
 	}
 	defer func() { _ = gz.Close() }()
 	if raw, err = io.ReadAll(io.LimitReader(gz, maxCursorDecodedBytes)); err != nil {
-		return out
+		return wire, false
 	}
 
-	var wire processCursorWire
 	if json.Unmarshal(raw, &wire) != nil {
-		return out
+		return processCursorWire{}, false
 	}
-	if len(wire.CPUMillis) != len(wire.PIDs) || len(wire.OffsetMillis) != len(wire.PIDs) {
+	return wire, true
+}
+
+func decodeProcessCursor(cursor string) map[int32]*models.ProcessCursorData {
+	out := make(map[int32]*models.ProcessCursorData)
+	wire, ok := decodeProcessCursorWire(cursor)
+	if !ok || len(wire.CPUMillis) != len(wire.PIDs) || len(wire.OffsetMillis) != len(wire.PIDs) {
 		return out
 	}
 	entries := make([]models.ProcessCursorData, len(wire.PIDs))
@@ -101,6 +125,20 @@ func decodeProcessCursor(cursor string) map[int32]*models.ProcessCursorData {
 		out[pid] = &entries[i]
 	}
 	return out
+}
+
+func decodeProcessGPUCursor(cursor string) processGPUSample {
+	sample := newProcessGPUSample(time.Time{})
+	sample.TimeMs = 0
+	wire, ok := decodeProcessCursorWire(cursor)
+	if !ok || wire.GPUMillis <= 0 || len(wire.GPUKeys) != len(wire.GPUPIDs) || len(wire.GPUValues) != len(wire.GPUPIDs) {
+		return sample
+	}
+	sample.TimeMs = wire.GPUMillis
+	for i, pid := range wire.GPUPIDs {
+		sample.setCounter(pid, wire.GPUKeys[i], wire.GPUValues[i])
+	}
+	return sample
 }
 
 // gopsutil can panic on macOS when reading process info for system processes
@@ -121,6 +159,30 @@ func (self *GopsUtil) GetProcesses(sortBy ProcSortBy, limit int, enableCPU bool,
 }
 
 func (self *GopsUtil) GetProcessesWithCursor(sortBy ProcSortBy, limit int, enableCPU bool, cursor string, mergeChildren bool) (*models.ProcessListResponse, error) {
+	return self.GetProcessesWithOptions(ProcessOptions{
+		SortBy:        sortBy,
+		Limit:         limit,
+		EnableCPU:     enableCPU,
+		Cursor:        cursor,
+		MergeChildren: mergeChildren,
+	})
+}
+
+type ProcessOptions struct {
+	SortBy    ProcSortBy
+	Limit     int
+	EnableCPU bool
+	// EnableGPU reads every process's DRM file descriptors and runs nvidia-smi
+	// pmon on awake NVIDIA cards. Sorting by GPU turns it on.
+	EnableGPU     bool
+	Cursor        string
+	MergeChildren bool
+}
+
+func (self *GopsUtil) GetProcessesWithOptions(opts ProcessOptions) (*models.ProcessListResponse, error) {
+	sortBy, limit, enableCPU, mergeChildren := opts.SortBy, opts.Limit, opts.EnableCPU, opts.MergeChildren
+	enableGPU := opts.EnableGPU || sortBy == SortByGPU
+
 	procs, err := self.procProvider.Processes()
 	if err != nil {
 		return nil, err
@@ -128,7 +190,19 @@ func (self *GopsUtil) GetProcessesWithCursor(sortBy ProcSortBy, limit int, enabl
 
 	totalMem, _ := self.memProvider.VirtualMemory()
 
-	cursorMap := decodeProcessCursor(cursor)
+	cursorMap := decodeProcessCursor(opts.Cursor)
+
+	pids := make([]int32, len(procs))
+	for i, p := range procs {
+		pids[i] = p.Pid
+	}
+	var gpuEntries []gpuEntry
+	var gpuPrev processGPUSample
+	if enableGPU {
+		gpuEntries, _ = detectGPUEntries()
+		gpuPrev = decodeProcessGPUCursor(opts.Cursor)
+	}
+	gpuBaseline := enableGPU && gpuPrev.TimeMs == 0
 
 	if enableCPU && len(cursorMap) == 0 {
 		for _, p := range procs {
@@ -142,6 +216,12 @@ func (self *GopsUtil) GetProcessesWithCursor(sortBy ProcSortBy, limit int, enabl
 				Timestamp: time.Now().UnixMilli(),
 			}
 		}
+		if gpuBaseline {
+			gpuPrev = scanProcessGPU(pids, gpuEntries, time.Now())
+		}
+		time.Sleep(cpuBaselineInterval)
+	} else if gpuBaseline {
+		gpuPrev = scanProcessGPU(pids, gpuEntries, time.Now())
 		time.Sleep(cpuBaselineInterval)
 	}
 
@@ -278,6 +358,24 @@ func (self *GopsUtil) GetProcessesWithCursor(sortBy ProcSortBy, limit int, enabl
 		}
 	}
 
+	var gpuCounters map[int32]map[string]uint64
+	var gpuMillis int64
+	if enableGPU {
+		cur := scanProcessGPU(pids, gpuEntries, time.Now())
+		usage := processGPUUsage(gpuPrev, cur)
+		for _, info := range procList {
+			if pct, ok := usage[info.PID]; ok {
+				info.GPU = &pct
+			}
+			if cur.Clients[info.PID] {
+				kb := cur.MemoryKB[info.PID]
+				info.GPUMemoryKB = &kb
+			}
+		}
+		gpuCounters = nextGPUCounters(gpuPrev, cur)
+		gpuMillis = cur.TimeMs
+	}
+
 	if mergeChildren {
 		procList = mergeProcessesByExecutable(procList)
 	}
@@ -299,6 +397,10 @@ func (self *GopsUtil) GetProcessesWithCursor(sortBy ProcSortBy, limit int, enabl
 		sort.Slice(procList, func(i, j int) bool {
 			return procList[i].PID < procList[j].PID
 		})
+	case SortByGPU:
+		sort.SliceStable(procList, func(i, j int) bool {
+			return gpuSortValue(procList[i]) > gpuSortValue(procList[j])
+		})
 	default:
 		sort.Slice(procList, func(i, j int) bool {
 			return procList[i].CPU > procList[j].CPU
@@ -311,7 +413,7 @@ func (self *GopsUtil) GetProcessesWithCursor(sortBy ProcSortBy, limit int, enabl
 
 	return &models.ProcessListResponse{
 		Processes: procList,
-		Cursor:    encodeProcessCursor(cursorList),
+		Cursor:    encodeProcessCursorWithGPU(cursorList, gpuMillis, gpuCounters),
 	}, nil
 }
 
@@ -322,6 +424,7 @@ const (
 	SortByMemory ProcSortBy = "memory"
 	SortByName   ProcSortBy = "name"
 	SortByPID    ProcSortBy = "pid"
+	SortByGPU    ProcSortBy = "gpu"
 )
 
 // Register enum in OpenAPI specification
@@ -335,6 +438,7 @@ func (u ProcSortBy) Schema(r huma.Registry) *huma.Schema {
 			string(SortByMemory),
 			string(SortByName),
 			string(SortByPID),
+			string(SortByGPU),
 		}...)
 		r.Map()["ProcSortBy"] = schemaRef
 	}
@@ -400,6 +504,8 @@ func mergeProcessesByExecutable(procList []*models.ProcessInfo) []*models.Proces
 			root.RSSPercent += p.RSSPercent
 			root.PSSKB += p.PSSKB
 			root.PSSPercent += p.PSSPercent
+			root.GPU = sumGPUUsage(root.GPU, p.GPU)
+			root.GPUMemoryKB = sumGPUMemory(root.GPUMemoryKB, p.GPUMemoryKB)
 			root.ChildCount++
 		}
 	}
@@ -409,4 +515,41 @@ func mergeProcessesByExecutable(procList []*models.ProcessInfo) []*models.Proces
 		result = append(result, p)
 	}
 	return result
+}
+
+// Processes without a GPU client sort below idle clients.
+func gpuSortValue(p *models.ProcessInfo) float64 {
+	if p.GPU == nil {
+		return -1
+	}
+	return *p.GPU
+}
+
+func sumGPUUsage(a, b *float64) *float64 {
+	if a == nil && b == nil {
+		return nil
+	}
+	sum := 0.0
+	if a != nil {
+		sum += *a
+	}
+	if b != nil {
+		sum += *b
+	}
+	sum = min(100, sum)
+	return &sum
+}
+
+func sumGPUMemory(a, b *uint64) *uint64 {
+	if a == nil && b == nil {
+		return nil
+	}
+	var sum uint64
+	if a != nil {
+		sum += *a
+	}
+	if b != nil {
+		sum += *b
+	}
+	return &sum
 }

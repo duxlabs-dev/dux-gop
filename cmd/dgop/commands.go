@@ -199,7 +199,14 @@ func runProcessesCommand(gopsUtil *gops.GopsUtil) error {
 	enableCPU := !disableProcCPU
 	sortBy := parseProcessSortBy(procSortBy, disableProcCPU)
 
-	result, err := gopsUtil.GetProcessesWithCursor(sortBy, procLimit, enableCPU, procCursor, mergeChildren)
+	result, err := gopsUtil.GetProcessesWithOptions(gops.ProcessOptions{
+		SortBy:        sortBy,
+		Limit:         procLimit,
+		EnableCPU:     enableCPU,
+		EnableGPU:     enableProcGPU,
+		Cursor:        procCursor,
+		MergeChildren: mergeChildren,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to get processes: %w", err)
 	}
@@ -273,6 +280,7 @@ func runMetaCommand(gopsUtil *gops.GopsUtil) error {
 		SortBy:         parseProcessSortBy(procSortBy, disableProcCPU),
 		ProcLimit:      procLimit,
 		EnableCPU:      !disableProcCPU,
+		EnableGPU:      enableProcGPU,
 		MergeChildren:  mergeChildren,
 		GPUPciIds:      metaGPUPciIds,
 		GPUCursor:      gpuCursor,
@@ -463,21 +471,36 @@ func displayDiskInfo(disks []*models.DiskInfo, mounts []*models.DiskMountInfo) {
 func displayProcesses(processes []*models.ProcessInfo) {
 	fmt.Println(titleStyle.Render(fmt.Sprintf("PROCESSES (%d)", len(processes))))
 
-	// Header
-	header := fmt.Sprintf("%-8s %-8s %-20s %-8s %-8s %s",
-		"PID", "PPID", "COMMAND", "CPU%", "MEM%", "FULL COMMAND")
-	fmt.Println(keyStyle.Render(header))
+	showGPU := false
+	for _, proc := range processes {
+		if proc.GPU != nil {
+			showGPU = true
+			break
+		}
+	}
+
+	header := fmt.Sprintf("%-8s %-8s %-20s %-8s %-8s ", "PID", "PPID", "COMMAND", "CPU%", "MEM%")
+	if showGPU {
+		header += fmt.Sprintf("%-8s ", "GPU%")
+	}
+	fmt.Println(keyStyle.Render(header + "FULL COMMAND"))
 	fmt.Println(strings.Repeat("─", 80))
 
 	for _, proc := range processes {
-		row := fmt.Sprintf("%-8d %-8d %-20s %-8.1f %-8.1f %s",
+		row := fmt.Sprintf("%-8d %-8d %-20s %-8.1f %-8.1f ",
 			proc.PID,
 			proc.PPID,
 			truncateString(proc.Command, 20),
 			proc.CPU,
-			proc.MemoryPercent,
-			truncateString(proc.FullCommand, 30))
-		fmt.Println(valueStyle.Render(row))
+			proc.MemoryPercent)
+		if showGPU {
+			gpu := "-"
+			if proc.GPU != nil {
+				gpu = fmt.Sprintf("%.1f", *proc.GPU)
+			}
+			row += fmt.Sprintf("%-8s ", gpu)
+		}
+		fmt.Println(valueStyle.Render(row + truncateString(proc.FullCommand, 30)))
 	}
 }
 

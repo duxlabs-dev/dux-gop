@@ -15,6 +15,7 @@ type MetaInput struct {
 	SortBy         gops.ProcSortBy `query:"sort_by" default:"cpu"`
 	Limit          int             `query:"limit" default:"0"`
 	DisableProcCPU bool            `query:"disable_proc_cpu" default:"false"`
+	EnableProcGPU  bool            `query:"enable_proc_gpu" default:"false" doc:"Sample per-process GPU usage (implied by sort_by=gpu)"`
 	MergeChildren  bool            `query:"merge_children" default:"true"`
 
 	// Module-specific parameters
@@ -52,6 +53,7 @@ func (self *HandlerGroup) Meta(ctx context.Context, input *MetaInput) (*MetaResp
 		SortBy:         input.SortBy,
 		ProcLimit:      input.Limit,
 		EnableCPU:      !input.DisableProcCPU,
+		EnableGPU:      input.EnableProcGPU,
 		MergeChildren:  input.MergeChildren,
 		GPUPciIds:      input.GPUPciIds,
 		GPUCursor:      input.GPUCursor,
