@@ -6,10 +6,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/AvengeMedia/dgop/config"
-	"github.com/AvengeMedia/dgop/gops"
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/duxlabs-dev/dux-gop/config"
+	"github.com/duxlabs-dev/dux-gop/gops"
 )
 
 func NewResponsiveTUIModel(gopsUtil *gops.GopsUtil) *ResponsiveTUIModel {

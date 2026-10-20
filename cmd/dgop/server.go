@@ -4,22 +4,22 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/AvengeMedia/dankgo/app"
-	"github.com/AvengeMedia/dankgo/errdefs/humaerr"
-	"github.com/AvengeMedia/dankgo/httpapi"
-	"github.com/AvengeMedia/dankgo/httpapi/middleware"
-	"github.com/AvengeMedia/dankgo/log"
-	gops_handler "github.com/AvengeMedia/dgop/api/gops"
-	"github.com/AvengeMedia/dgop/api/server"
-	"github.com/AvengeMedia/dgop/config"
-	"github.com/AvengeMedia/dgop/gops"
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
+	"github.com/duxlabs-dev/dux-go/app"
+	"github.com/duxlabs-dev/dux-go/errdefs/humaerr"
+	"github.com/duxlabs-dev/dux-go/httpapi"
+	"github.com/duxlabs-dev/dux-go/httpapi/middleware"
+	"github.com/duxlabs-dev/dux-go/log"
+	gops_handler "github.com/duxlabs-dev/dux-gop/api/gops"
+	"github.com/duxlabs-dev/dux-gop/api/server"
+	"github.com/duxlabs-dev/dux-gop/config"
+	"github.com/duxlabs-dev/dux-gop/gops"
 	"github.com/go-chi/chi/v5"
 	"github.com/spf13/cobra"
 )
 
-const apiTitle = "DankGop API"
+const apiTitle = "Dux GOP API"
 
 var serverCmd = &cobra.Command{
 	Use:   "server",
@@ -71,7 +71,7 @@ func startAPI(ctx context.Context, cfg *config.Config) error {
 	})
 
 	addr := cfg.ApiPort
-	log.Infof(" Starting DankGop API server on %s", addr)
+	log.Infof(" Starting Dux GOP API server on %s", addr)
 	log.Infof(" API Documentation: http://localhost%s/docs", addr)
 	log.Infof(" OpenAPI Spec: http://localhost%s/openapi.json", addr)
 	log.Infof(" Health Check: http://localhost%s/health", addr)

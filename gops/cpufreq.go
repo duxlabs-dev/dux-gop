@@ -1,6 +1,6 @@
 package gops
 
-import "github.com/AvengeMedia/dgop/models"
+import "github.com/duxlabs-dev/dux-gop/models"
 
 type cpuStatic struct {
 	minMHz, maxMHz float64

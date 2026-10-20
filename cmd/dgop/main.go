@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/AvengeMedia/dankgo/log"
-	"github.com/AvengeMedia/dgop/gops"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/duxlabs-dev/dux-go/log"
+	"github.com/duxlabs-dev/dux-gop/gops"
 	"github.com/spf13/cobra"
 )
 

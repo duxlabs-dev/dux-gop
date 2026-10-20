@@ -3,7 +3,7 @@ package tui
 import (
 	"strings"
 
-	"github.com/AvengeMedia/dgop/models"
+	"github.com/duxlabs-dev/dux-gop/models"
 )
 
 type distroArt struct {

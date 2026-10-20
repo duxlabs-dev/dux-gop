@@ -2,7 +2,7 @@
 
 package gops
 
-import "github.com/AvengeMedia/dgop/models"
+import "github.com/duxlabs-dev/dux-gop/models"
 
 func (self *GopsUtil) GetMemoryInfo() (*models.MemoryInfo, error) {
 	v, err := self.memProvider.VirtualMemory()

@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/AvengeMedia/dgop/models"
+	"github.com/duxlabs-dev/dux-gop/models"
 	"github.com/shirou/gopsutil/v4/process"
 )
 

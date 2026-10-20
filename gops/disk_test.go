@@ -3,7 +3,7 @@ package gops
 import (
 	"testing"
 
-	"github.com/AvengeMedia/dgop/gops/mocks"
+	"github.com/duxlabs-dev/dux-gop/gops/mocks"
 	"github.com/shirou/gopsutil/v4/disk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

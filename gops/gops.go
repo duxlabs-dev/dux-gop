@@ -3,8 +3,8 @@ package gops
 import (
 	"time"
 
-	"github.com/AvengeMedia/dankgo/log"
-	"github.com/AvengeMedia/dgop/models"
+	"github.com/duxlabs-dev/dux-go/log"
+	"github.com/duxlabs-dev/dux-gop/models"
 	"github.com/shirou/gopsutil/v4/host"
 	"github.com/shirou/gopsutil/v4/sensors"
 )

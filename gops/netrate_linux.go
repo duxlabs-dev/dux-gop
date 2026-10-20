@@ -11,7 +11,7 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/AvengeMedia/dgop/models"
+	"github.com/duxlabs-dev/dux-gop/models"
 )
 
 const netSysRoot = "/sys/class/net"

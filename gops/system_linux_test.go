@@ -5,7 +5,7 @@ package gops
 import (
 	"testing"
 
-	"github.com/AvengeMedia/dgop/models"
+	"github.com/duxlabs-dev/dux-gop/models"
 
 	"github.com/stretchr/testify/assert"
 )

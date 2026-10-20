@@ -1,8 +1,8 @@
 package server
 
 import (
-	"github.com/AvengeMedia/dgop/config"
-	"github.com/AvengeMedia/dgop/gops"
+	"github.com/duxlabs-dev/dux-gop/config"
+	"github.com/duxlabs-dev/dux-gop/gops"
 )
 
 type Server struct {

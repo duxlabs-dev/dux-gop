@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/AvengeMedia/dgop/gops"
+	"github.com/duxlabs-dev/dux-gop/gops"
 	"github.com/spf13/cobra"
 )
 

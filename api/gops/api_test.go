@@ -9,11 +9,11 @@ import (
 	"os"
 	"testing"
 
-	gops_handler "github.com/AvengeMedia/dgop/api/gops"
-	"github.com/AvengeMedia/dgop/api/server"
-	"github.com/AvengeMedia/dgop/gops"
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/humatest"
+	gops_handler "github.com/duxlabs-dev/dux-gop/api/gops"
+	"github.com/duxlabs-dev/dux-gop/api/server"
+	"github.com/duxlabs-dev/dux-gop/gops"
 )
 
 func newAPI(t *testing.T) humatest.TestAPI {

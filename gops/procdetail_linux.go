@@ -15,7 +15,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/AvengeMedia/dgop/models"
+	"github.com/duxlabs-dev/dux-gop/models"
 	"github.com/shirou/gopsutil/v4/process"
 	"golang.org/x/sys/unix"
 )

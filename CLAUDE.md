@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-DankGop is a system monitoring tool with CLI and REST API, designed to provide comprehensive system metrics. It's written in Go and compiles to a single binary that provides both CLI commands and a REST API server.
+Dux GOP is a system monitoring tool with CLI and REST API, designed to provide comprehensive system metrics. It's written in Go and compiles to a single binary that provides both CLI commands and a REST API server.
 
 ## Development Commands
 

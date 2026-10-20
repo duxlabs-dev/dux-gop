@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/AvengeMedia/dgop/models"
+	"github.com/duxlabs-dev/dux-gop/models"
 )
 
 func (self *GopsUtil) GetDiskInfo() ([]*models.DiskInfo, error) {

@@ -5,7 +5,7 @@ package gops
 import (
 	"sort"
 
-	"github.com/AvengeMedia/dgop/models"
+	"github.com/duxlabs-dev/dux-gop/models"
 )
 
 // GetSensors returns every hwmon temperature, fan and power input.

@@ -3,8 +3,8 @@ package config
 import (
 	"log"
 
-	"github.com/AvengeMedia/dankgo/paths"
 	"github.com/caarlos0/env/v11"
+	"github.com/duxlabs-dev/dux-go/paths"
 )
 
 var appPaths = paths.New("dgop")

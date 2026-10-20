@@ -1,9 +1,9 @@
 package main
 
 import (
-	"github.com/AvengeMedia/dgop/cmd/dgop/tui"
-	"github.com/AvengeMedia/dgop/gops"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/duxlabs-dev/dux-gop/cmd/dgop/tui"
+	"github.com/duxlabs-dev/dux-gop/gops"
 )
 
 func runTUIWithOptions(gopsUtil *gops.GopsUtil, hideCPUCores, summarizeCores bool) error {

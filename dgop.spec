@@ -10,7 +10,7 @@ Release:        1%{?dist}
 Summary:        %{pkg_summary}
 
 License:        MIT
-URL:            https://github.com/AvengeMedia/dgop
+URL:            https://github.com/duxlabs-dev/dux-gop
 VCS:            {{{ git_dir_vcs }}}
 Source0:        {{{ git_dir_pack }}}
 

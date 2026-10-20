@@ -3,8 +3,8 @@ package gops_handler
 import (
 	"net/http"
 
-	"github.com/AvengeMedia/dgop/api/server"
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/duxlabs-dev/dux-gop/api/server"
 )
 
 type HandlerGroup struct {

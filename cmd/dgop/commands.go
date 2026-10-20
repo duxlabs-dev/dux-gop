@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/AvengeMedia/dgop/gops"
-	"github.com/AvengeMedia/dgop/models"
+	"github.com/duxlabs-dev/dux-gop/gops"
+	"github.com/duxlabs-dev/dux-gop/models"
 	"github.com/spf13/cobra"
 )
 

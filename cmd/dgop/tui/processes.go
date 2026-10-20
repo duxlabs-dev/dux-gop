@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/AvengeMedia/dgop/gops"
-	"github.com/AvengeMedia/dgop/models"
 	"github.com/charmbracelet/bubbles/table"
+	"github.com/duxlabs-dev/dux-gop/gops"
+	"github.com/duxlabs-dev/dux-gop/models"
 )
 
 func (m *ResponsiveTUIModel) activeSearchQuery() string {

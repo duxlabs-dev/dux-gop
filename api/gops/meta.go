@@ -4,10 +4,10 @@ import (
 	"context"
 	"strings"
 
-	"github.com/AvengeMedia/dankgo/log"
-	"github.com/AvengeMedia/dgop/gops"
-	"github.com/AvengeMedia/dgop/models"
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/duxlabs-dev/dux-go/log"
+	"github.com/duxlabs-dev/dux-gop/gops"
+	"github.com/duxlabs-dev/dux-gop/models"
 )
 
 type MetaInput struct {

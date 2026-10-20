@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/AvengeMedia/dgop/gops/mocks"
-	"github.com/AvengeMedia/dgop/models"
+	"github.com/duxlabs-dev/dux-gop/gops/mocks"
+	"github.com/duxlabs-dev/dux-gop/models"
 	"github.com/shirou/gopsutil/v4/mem"
 	"github.com/shirou/gopsutil/v4/process"
 	"github.com/stretchr/testify/assert"

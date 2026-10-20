@@ -5,7 +5,7 @@ package gops
 import (
 	"sort"
 
-	"github.com/AvengeMedia/dgop/models"
+	"github.com/duxlabs-dev/dux-gop/models"
 )
 
 // GetSensors maps the platform temperature sensors; fans and power are Linux-only.

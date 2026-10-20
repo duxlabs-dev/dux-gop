@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/AvengeMedia/dgop/models"
+	"github.com/duxlabs-dev/dux-gop/models"
 )
 
 var dmiUdevData = "/run/udev/data/+dmi:id"

@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/AvengeMedia/dgop/models"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/duxlabs-dev/dux-gop/models"
 )
 
 const (

@@ -6,7 +6,7 @@ template: testify
 template-data:
   unroll-variadic: true
 packages:
-  github.com/AvengeMedia/dgop/gops:
+  github.com/duxlabs-dev/dux-gop/gops:
     interfaces:
       CPUInfoProvider: {}
       DiskInfoProvider: {}

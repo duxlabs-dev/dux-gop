@@ -55,9 +55,9 @@
         {
           dgop = (pkgs.buildGoModule.override { go = goForPkgs pkgs; }) (finalAttrs: {
             pname = "dgop";
-            version = "1.6.2";
+            version = "2.0.0";
             src = ./.;
-            vendorHash = "sha256-/mTvKTN+NIFplbp0eD/7490nj2fDzH8Mf4z3i9jhAt0=";
+            vendorHash = "sha256-bVrNwxylrKkmDWdrw+G/yi3DgVdRZtOVn53HfmpXjJk=";
 
             ldflags = [
               "-s"
@@ -85,7 +85,7 @@
 
             meta = {
               description = "API & CLI for System Resources";
-              homepage = "https://github.com/AvengeMedia/dgop";
+              homepage = "https://github.com/duxlabs-dev/dux-gop";
               mainProgram = "dgop";
               binaryNativeCode = true;
               license = lib.licenses.mit;

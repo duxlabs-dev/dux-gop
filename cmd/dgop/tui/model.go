@@ -3,12 +3,12 @@ package tui
 import (
 	"time"
 
-	"github.com/AvengeMedia/dankgo/log"
-	"github.com/AvengeMedia/dgop/config"
-	"github.com/AvengeMedia/dgop/gops"
-	"github.com/AvengeMedia/dgop/models"
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/duxlabs-dev/dux-go/log"
+	"github.com/duxlabs-dev/dux-gop/config"
+	"github.com/duxlabs-dev/dux-gop/gops"
+	"github.com/duxlabs-dev/dux-gop/models"
 )
 
 const (

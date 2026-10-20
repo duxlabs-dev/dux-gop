@@ -5,10 +5,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/AvengeMedia/dgop/gops"
-	"github.com/AvengeMedia/dgop/models"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/duxlabs-dev/dux-gop/gops"
+	"github.com/duxlabs-dev/dux-gop/models"
 )
 
 var Version = "dev"

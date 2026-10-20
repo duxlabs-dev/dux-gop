@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/AvengeMedia/dgop/gops/mocks"
+	"github.com/duxlabs-dev/dux-gop/gops/mocks"
 	"github.com/shirou/gopsutil/v4/cpu"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"

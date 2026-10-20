@@ -1,5 +1,5 @@
 <div align="center">
-  <a href="https://danklinux.com">
+  <a href="https://duxlabs.dev">
     <img src="assets/danklogo.svg" alt="dgop" width="200">
   </a>
 
@@ -7,10 +7,10 @@
 
   ### Stateless, cursor-based system and process monitoring
 
-[![Documentation](https://img.shields.io/badge/docs-danklinux.com-9ccbfb?style=for-the-badge&labelColor=101418)](https://danklinux.com/docs/dgop)
-[![GitHub Release](https://img.shields.io/github/v/release/AvengeMedia/dgop?style=for-the-badge&labelColor=101418&color=a6da95)](https://github.com/AvengeMedia/dgop/releases)
+[![Documentation](https://img.shields.io/badge/docs-duxlabs.dev-9ccbfb?style=for-the-badge&labelColor=101418)](https://duxlabs.dev/docs/dgop)
+[![GitHub Release](https://img.shields.io/github/v/release/duxlabs-dev/dux-gop?style=for-the-badge&labelColor=101418&color=a6da95)](https://github.com/duxlabs-dev/dux-gop/releases)
 [![Arch Linux](https://img.shields.io/archlinux/v/extra/x86_64/dgop?style=for-the-badge&labelColor=101418&color=f5a97f)](https://archlinux.org/packages/extra/x86_64/dgop/)
-[![GitHub License](https://img.shields.io/github/license/AvengeMedia/dgop?style=for-the-badge&labelColor=101418&color=b9c8da)](https://github.com/AvengeMedia/dgop/blob/master/LICENSE)
+[![GitHub License](https://img.shields.io/github/license/duxlabs-dev/dux-gop?style=for-the-badge&labelColor=101418&color=b9c8da)](https://github.com/duxlabs-dev/dux-gop/blob/master/LICENSE)
 
 </div>
 
@@ -22,16 +22,16 @@
 
 System monitoring tool with CLI and REST API built in Go. Fast, single binary, JSON output, OpenAPI spec.
 
-Use standalone for system monitoring, or as a companion for [DankMaterialShell](https://github.com/AvengeMedia/DankMaterialShell) to unlock system information widgets.
+Use standalone for system monitoring, or as a companion for [Dux Shell](https://github.com/duxlabs-dev/dux-shell) to unlock system information widgets.
 
-**[Full documentation →](https://danklinux.com/docs/dgop)**
+**[Full documentation →](https://duxlabs.dev/docs/dgop)**
 
 ---
 
 ## Installation
 
 ### Latest Release
-Download the latest binary from [GitHub Releases](https://github.com/AvengeMedia/dgop/releases/latest)
+Download the latest binary from [GitHub Releases](https://github.com/duxlabs-dev/dux-gop/releases/latest)
 
 ### Arch Linux
 
@@ -42,7 +42,7 @@ sudo pacman -S dgop
 
 ### Go Install
 ```bash
-go install github.com/AvengeMedia/dgop/cmd/dgop@master
+go install github.com/duxlabs-dev/dux-gop/cmd/dgop@master
 ```
 
 ### Build from Source

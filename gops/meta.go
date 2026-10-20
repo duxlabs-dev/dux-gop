@@ -6,8 +6,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/AvengeMedia/dankgo/log"
-	"github.com/AvengeMedia/dgop/models"
+	"github.com/duxlabs-dev/dux-go/log"
+	"github.com/duxlabs-dev/dux-gop/models"
 	"golang.org/x/sync/errgroup"
 )
 

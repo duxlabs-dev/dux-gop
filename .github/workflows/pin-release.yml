@@ -1,6 +1,6 @@
 name: Pin release
 
-# Pins this repo to a DankMaterialShell release version. Dispatched by the DMS
+# Pins this repo to a Dux Shell release version. Dispatched by the DMS
 # Release workflow; the tag push that lands here runs Create Release.
 # X.Y.0 tags master and cuts stable-X.Y there; X.Y.Z tags stable-X.Y.
 
@@ -115,8 +115,8 @@ jobs:
           BRANCH: ${{ steps.decide.outputs.branch }}
         run: |
           set -euo pipefail
-          git config user.name "dms-ci[bot]"
-          git config user.email "dms-ci[bot]@users.noreply.github.com"
+          git config user.name "dux-ci[bot]"
+          git config user.email "344434142+dux-ci[bot]@users.noreply.github.com"
           git switch --detach "origin/${BRANCH}"
 
           sed -i "s/version = \"[0-9][^\"]*\"/version = \"${VERSION}\"/" flake.nix
