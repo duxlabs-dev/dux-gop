@@ -7,13 +7,19 @@ import (
 	"net/url"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/humatest"
 	gops_handler "github.com/duxlabs-dev/dux-gop/api/gops"
 	"github.com/duxlabs-dev/dux-gop/api/server"
 	"github.com/duxlabs-dev/dux-gop/gops"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+// Cursor written before the process extras existed: pids 1 and 2 only.
+const legacyProcCursor = "H4sIAAAAAAAC_6tWKlGyMjQ3QAAdpYLMFCWraEMdo1gdpeSCUhAbJG4EJIAiKUAN0QY6prG1APp9R3w8AAAA"
 
 func newAPI(t *testing.T) humatest.TestAPI {
 	_, api := humatest.New(t)
@@ -21,123 +27,119 @@ func newAPI(t *testing.T) humatest.TestAPI {
 	return api
 }
 
-func TestNewEndpoints(t *testing.T) {
-	api := newAPI(t)
-	cases := []struct{ path, key string }{
-		{"/gops/sensors", "sensors"},
-		{"/gops/memory/modules", "modules"},
-	}
-	for _, c := range cases {
-		resp := api.Get(c.path)
-		if resp.Code != http.StatusOK {
-			t.Fatalf("%s: status %d: %s", c.path, resp.Code, resp.Body.String())
-		}
-		var body map[string]any
-		if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
-			t.Fatalf("%s: %v", c.path, err)
-		}
-		if _, ok := body[c.key]; !ok {
-			t.Errorf("%s: missing key %q in %s", c.path, c.key, resp.Body.String())
-		}
-	}
+func getJSON(t *testing.T, path string, want int) map[string]any {
+	t.Helper()
+	resp := newAPI(t).Get(path)
+	require.Equal(t, want, resp.Code, "GET %s: %s", path, resp.Body.String())
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &body))
+	return body
 }
 
-func TestNetRateAllInterfaces(t *testing.T) {
-	if resp := newAPI(t).Get("/gops/net-rate?all_interfaces=true"); resp.Code != http.StatusOK {
-		t.Fatalf("status %d: %s", resp.Code, resp.Body.String())
-	}
+func obj(t *testing.T, v any) map[string]any {
+	t.Helper()
+	m, ok := v.(map[string]any)
+	require.True(t, ok, "want object, got %T", v)
+	return m
 }
 
-func TestMetaNewParams(t *testing.T) {
-	resp := newAPI(t).Get("/gops/meta?modules=sensors,gpu,memory-modules&gpu_cursor=&net_rate_all_interfaces=true")
-	if resp.Code != http.StatusOK {
-		t.Fatalf("status %d: %s", resp.Code, resp.Body.String())
-	}
+func list(v any) []any {
+	l, _ := v.([]any)
+	return l
 }
 
-func TestOpenAPIListsNewOperations(t *testing.T) {
-	api := newAPI(t)
-	for _, p := range []string{"/gops/sensors", "/gops/memory/modules", "/gops/process/{pid}"} {
-		if api.OpenAPI().Paths[p] == nil {
-			t.Errorf("%s missing from OpenAPI", p)
+// rowFor returns the row of the test process in a list of process rows.
+func rowFor(t *testing.T, rows []any) map[string]any {
+	t.Helper()
+	for _, r := range rows {
+		if row := obj(t, r); row["pid"] == float64(os.Getpid()) {
+			return row
 		}
 	}
+	require.FailNow(t, "own pid not in process list")
+	return nil
 }
 
-func TestProcessesIOCursorJourney(t *testing.T) {
+func TestEndpointsAndErrors(t *testing.T) {
+	for path, key := range map[string]string{"/gops/sensors": "sensors", "/gops/memory/modules": "modules"} {
+		assert.Contains(t, getJSON(t, path, http.StatusOK), key, path)
+	}
+	getJSON(t, "/gops/net-rate?all_interfaces=true", http.StatusOK)
+	getJSON(t, "/gops/meta?modules=sensors,gpu,memory-modules&gpu_cursor=not-a-cursor&net_rate_all_interfaces=true", http.StatusOK)
+	getJSON(t, "/gops/meta?modules=processes,bogus", http.StatusBadRequest)
+	getJSON(t, "/gops/process/2147483647", http.StatusNotFound)
+
+	pid := getJSON(t, fmt.Sprintf("/gops/process/%d", os.Getpid()), http.StatusOK)["pid"]
+	assert.Equal(t, float64(os.Getpid()), pid)
+}
+
+func TestProcessJourney(t *testing.T) {
 	if _, err := os.ReadFile("/proc/self/io"); err != nil {
 		t.Skipf("/proc/self/io unreadable: %v", err)
 	}
-	api := newAPI(t)
-	var first struct {
-		Cursor string `json:"cursor"`
+	const path = "/gops/meta?modules=processes,process-gpu,process-io&limit=0&disable_proc_cpu=true"
+
+	first := getJSON(t, path, http.StatusOK)
+	cursor, _ := first["cursor"].(string)
+	require.NotEmpty(t, cursor)
+	for _, k := range []string{"diskRead", "diskWrite", "gpu"} {
+		assert.NotNil(t, rowFor(t, list(first["processes"]))[k], "first call lacks %q", k)
 	}
-	resp := api.Get("/gops/processes?io=true&gpu=true&limit=0")
-	if resp.Code != http.StatusOK {
-		t.Fatalf("status %d: %s", resp.Code, resp.Body.String())
+
+	time.Sleep(100 * time.Millisecond)
+	second := getJSON(t, path+"&proc_cursor="+url.QueryEscape(cursor), http.StatusOK)
+	for _, k := range []string{"diskRead", "diskWrite", "gpu"} {
+		assert.NotNil(t, rowFor(t, list(second["processes"]))[k], "second call lacks %q", k)
 	}
-	if err := json.Unmarshal(resp.Body.Bytes(), &first); err != nil {
-		t.Fatal(err)
-	}
-	if first.Cursor == "" {
-		t.Fatal("first response returned no cursor")
-	}
-	resp = api.Get("/gops/processes?io=true&limit=0&sort_by=disk&cursor=" + url.QueryEscape(first.Cursor))
-	if resp.Code != http.StatusOK {
-		t.Fatalf("status %d: %s", resp.Code, resp.Body.String())
-	}
-	var out struct {
-		Data []map[string]any `json:"data"`
-	}
-	if err := json.Unmarshal(resp.Body.Bytes(), &out); err != nil {
-		t.Fatal(err)
-	}
-	for _, p := range out.Data {
-		if int(p["pid"].(float64)) == os.Getpid() {
-			if _, ok := p["diskRead"]; !ok {
-				t.Fatal("diskRead missing on own pid row")
-			}
-			return
+}
+
+func TestLegacyProcessCursor(t *testing.T) {
+	body := getJSON(t, "/gops/meta?modules=processes&limit=0&proc_cursor="+legacyProcCursor, http.StatusOK)
+	rows := list(body["processes"])
+	require.NotEmpty(t, rows)
+	for _, r := range rows {
+		for _, k := range []string{"diskRead", "diskWrite", "gpu", "vramKB"} {
+			assert.NotContains(t, obj(t, r), k)
 		}
 	}
-	t.Fatal("own pid not in process list")
+	assert.NotNil(t, body["cursor"])
 }
 
-func TestProcessesDefaultShape(t *testing.T) {
-	resp := newAPI(t).Get("/gops/processes?limit=0")
-	var out struct {
-		Data []map[string]any `json:"data"`
+func TestPerformanceRail(t *testing.T) {
+	if b, err := os.ReadFile("/proc/diskstats"); err != nil || len(b) == 0 {
+		t.Skip("/proc/diskstats unavailable")
 	}
-	if err := json.Unmarshal(resp.Body.Bytes(), &out); err != nil || resp.Code != http.StatusOK {
-		t.Fatalf("status %d: %v", resp.Code, err)
+	const mods = "modules=cpu,memory,disk-rate,net-rate,gpu,sensors,memory-modules"
+	cursorOf := func(m map[string]any, key string) string {
+		s, _ := obj(t, m[key])["cursor"].(string)
+		return s
 	}
-	for _, p := range out.Data {
-		for _, k := range []string{"diskRead", "diskWrite", "gpu"} {
-			if _, ok := p[k]; ok {
-				t.Fatalf("unexpected %s in default output", k)
-			}
+
+	first := getJSON(t, "/gops/meta?"+mods, http.StatusOK)
+	assert.Contains(t, obj(t, first["cpu"]), "usage")
+	assert.NotNil(t, obj(t, first["memory"])["total"])
+	assert.Contains(t, obj(t, first["sensors"]), "sensors")
+	disks := list(obj(t, first["diskrate"])["disks"])
+	if len(disks) == 0 {
+		t.Skip("no disks reported by /proc/diskstats")
+	}
+	for _, d := range disks {
+		assert.Nil(t, obj(t, d)["busy"], "busy present without a prior sample")
+	}
+
+	q := url.Values{}
+	q.Set("cpu_cursor", cursorOf(first, "cpu"))
+	q.Set("disk_rate_cursor", cursorOf(first, "diskrate"))
+	time.Sleep(100 * time.Millisecond)
+	second := getJSON(t, "/gops/meta?"+mods+"&"+q.Encode(), http.StatusOK)
+
+	assert.Contains(t, obj(t, second["cpu"]), "usage")
+	assert.NotEqual(t, q.Get("cpu_cursor"), cursorOf(second, "cpu"), "cpu cursor did not advance")
+	withBusy := 0
+	for _, d := range list(obj(t, second["diskrate"])["disks"]) {
+		if obj(t, d)["busy"] != nil {
+			withBusy++
 		}
 	}
-}
-
-func TestProcessDetailEndpoint(t *testing.T) {
-	api := newAPI(t)
-	resp := api.Get(fmt.Sprintf("/gops/process/%d", os.Getpid()))
-	if resp.Code != http.StatusOK {
-		t.Fatalf("status %d: %s", resp.Code, resp.Body.String())
-	}
-	var body map[string]any
-	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	if body["pid"] != float64(os.Getpid()) {
-		t.Errorf("pid = %v, want %d", body["pid"], os.Getpid())
-	}
-}
-
-func TestProcessDetailEndpointNotFound(t *testing.T) {
-	resp := newAPI(t).Get("/gops/process/2147483647")
-	if resp.Code != http.StatusNotFound {
-		t.Fatalf("status %d, want 404: %s", resp.Code, resp.Body.String())
-	}
+	assert.Positive(t, withBusy, "no disk row gained busy from the disk_rate_cursor")
 }

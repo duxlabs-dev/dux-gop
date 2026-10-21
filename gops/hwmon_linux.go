@@ -73,8 +73,6 @@ type hwmonInput struct {
 	powerCap, powerMax string
 }
 
-// readHwmonChips reads every usable chip under an hwmon class root, except
-// those of the devices in skip (by bus id).
 func (self *GopsUtil) readHwmonChips(root string, skip map[string]bool) []hwmonChip {
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -151,9 +149,7 @@ func hwmonStateFor(dir, name string) *hwmonState {
 	return st
 }
 
-// readChipAsync returns the last readings and starts a new read. Only a chip
-// without readings yet makes the caller wait, at most slowChipWait, so the
-// values of an async chip are one call old.
+// readChipAsync returns the last readings and starts a new read; only a chip without readings waits (at most slowChipWait).
 func (self *GopsUtil) readChipAsync(dir string, st *hwmonState) []hwmonReading {
 	hwmonMu.Lock()
 	if !st.inflight {
@@ -243,7 +239,6 @@ func scanHwmonInputs(dir string) []hwmonInput {
 		}
 		n, _ := strconv.Atoi(m[2])
 		k := key{m[1], n}
-		// power*_input wins over power*_average
 		if _, seen := files[k]; !seen || m[3] == "input" {
 			files[k] = entry.Name()
 		}

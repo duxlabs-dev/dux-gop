@@ -42,15 +42,13 @@ type procNetReader struct {
 	netDump
 	socks map[uint32]sockDiagEntry
 	ok    bool
-	// netNS is our network namespace; a process in another one holds sockets
-	// the dump can't see. Empty skips the check.
+	// netNS is our network namespace; empty skips the check.
 	netNS string
 
 	nsMu       sync.Mutex
 	loopbackNS map[string]bool
 }
 
-// newProcNetReader takes one socket dump to serve a whole sampling pass.
 func (self *GopsUtil) newProcNetReader() *procNetReader {
 	self.tails.start(self.sockDestroys)
 	r := &procNetReader{netDump: netDump{tail: self.tails.get}, netNS: ownNetNS()}
@@ -76,7 +74,6 @@ func (self *GopsUtil) newProcNetReader() *procNetReader {
 	return r
 }
 
-// fromScan derives a process's readings from an fd scan taken with sockets on.
 // A socket held by several fds counts once.
 func (self *procNetReader) fromScan(scan procFDScan) procNet {
 	if !self.ok {
@@ -118,15 +115,12 @@ func (self *procNetReader) fromScan(scan procFDScan) procNet {
 	return out
 }
 
-// foreign reports a process in another network namespace. An unreadable ns
-// link counts as ours: processes with capabilities (systemd --user) hide it
-// but not their fds.
+// foreign reports another network namespace; an unreadable ns link counts as ours.
 func (self *procNetReader) foreign(scan procFDScan) bool {
 	return self.netNS != "" && scan.NetNS != "" && scan.NetNS != self.netNS
 }
 
-// loopbackOnly reports a namespace whose only interface is lo, like a browser
-// sandbox's: the only counted sockets in it came from ours, so our dump has them.
+// loopbackOnly reports a namespace whose only interface is lo (a browser sandbox).
 func (self *procNetReader) loopbackOnly(procRoot string, pid int32, ns string) bool {
 	self.nsMu.Lock()
 	only, cached := self.loopbackNS[ns]
@@ -156,9 +150,8 @@ const (
 	maxSockTails   = 1 << 16
 )
 
-// sockTails keeps the final counters of destroyed sockets, so the traffic
-// between a socket's last dump and its close still counts. Entries are
-// never consumed: concurrent callers with different cursors all read them.
+// sockTails keeps the final counters of destroyed sockets so the traffic between
+// a socket's last dump and its close still counts. Entries are not consumed.
 type sockTails struct {
 	mu      sync.Mutex
 	started bool
@@ -212,7 +205,6 @@ func (self *sockTails) record(e sockDiagEntry, now time.Time) {
 		}
 		self.pruned = now
 	}
-	// Past the cap, tails are dropped until the next prune.
 	if len(self.final) < maxSockTails {
 		self.final[e.Cookie] = sockTail{e.RxBytes, e.TxBytes, now}
 	}

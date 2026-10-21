@@ -137,8 +137,6 @@ func readAMDGPU(dev string, sample *gpuSample) {
 	sample.MemoryBusy = readFloat(filepath.Join(dev, "mem_busy_percent"))
 }
 
-// readAMDGPUClocks adds the DPM table maxima, and the current level where
-// hwmon has no frequency sensor.
 func readAMDGPUClocks(dev string, sample *gpuSample) {
 	cur, maxClock := readDPMLevels(filepath.Join(dev, "pp_dpm_sclk"))
 	sample.CoreClock, sample.CoreClockMax = firstSet(sample.CoreClock, cur), maxClock
@@ -146,8 +144,7 @@ func readAMDGPUClocks(dev string, sample *gpuSample) {
 	sample.MemoryClock, sample.MemoryClockMax = firstSet(sample.MemoryClock, cur), maxClock
 }
 
-// readDPMLevels parses amdgpu pp_dpm_* files ("1: 500Mhz *"). The "S:" sleep
-// level is not a clock and is skipped even when it is current.
+// readDPMLevels parses amdgpu pp_dpm_* files; the "S:" sleep level is not a clock.
 func readDPMLevels(path string) (cur, maxClock *float64) {
 	for line := range strings.SplitSeq(readTrimmed(path), "\n") {
 		level, rest, ok := strings.Cut(line, ":")
@@ -179,10 +176,8 @@ func readPCIeLink(dev string, sample *gpuSample) {
 	sample.PcieLinkWidthMax, _ = strconv.Atoi(readTrimmed(filepath.Join(dev, "max_link_width")))
 }
 
-// readAMDGPUPCIe takes the link from pp_dpm_pcie ("2: 16.0GT/s, x16 623Mhz *").
-// A dGPU's own PCI function sits behind the card's internal switch, so its
-// sysfs link is that internal one, while the SMU reports the slot's link and
-// caps its levels to what the slot supports.
+// readAMDGPUPCIe takes the link from pp_dpm_pcie: a dGPU's sysfs link is its card's internal
+// switch, while the SMU reports the slot's.
 func readAMDGPUPCIe(dev string, sample *gpuSample) {
 	var curSpeed, maxSpeed float64
 	var curWidth, maxWidth int
@@ -363,7 +358,7 @@ func (s gpuSampler) readGPUHwmon(dev, busId string, sample *gpuSample, prev, nex
 			sample.Power = readHwmonEnergyPower(dir, busId, prev, next)
 		}
 
-		// PWM duty is what nvidia-smi reports as fan speed, so prefer it over rpm.
+		// nvidia-smi reports PWM duty as fan speed, so prefer it over rpm.
 		pwm, pwmMax := readFloat(filepath.Join(dir, "pwm1")), readFloat(filepath.Join(dir, "pwm1_max"))
 		if pwm != nil && pwmMax != nil && *pwmMax > 0 {
 			sample.FanPercent = new(min(*pwm / *pwmMax * 100, 100))
@@ -371,8 +366,6 @@ func (s gpuSampler) readGPUHwmon(dev, busId string, sample *gpuSample, prev, nex
 	}
 }
 
-// readHwmonEnergyPower derives watts from the cumulative energy counter in
-// microjoules, which is all some drivers publish.
 func readHwmonEnergyPower(dir, busId string, prev, next gpuCursor) *float64 {
 	microJ := readUint(filepath.Join(dir, "energy1_input"))
 	if microJ == nil {
@@ -465,9 +458,7 @@ func runNvidiaSmi(fields, busIds []string) ([]byte, error) {
 	).Output()
 }
 
-// parseNvidiaSmi reads rows in nvidiaSmiFields order, optionally followed by
-// nvidiaSmiVideoFields, keyed by sysfs bus id. Unsupported values come back as
-// "[N/A]" or "[Not Supported]" and stay nil.
+// parseNvidiaSmi reads rows in nvidiaSmiFields order by bus id; [N/A] and [Not Supported] stay nil.
 func parseNvidiaSmi(out []byte) map[string]gpuSample {
 	rows := map[string]gpuSample{}
 	for line := range strings.SplitSeq(string(out), "\n") {

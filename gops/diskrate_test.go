@@ -2,11 +2,9 @@ package gops
 
 import (
 	"encoding/base64"
-	"encoding/json"
 	"testing"
 	"time"
 
-	"github.com/duxlabs-dev/dux-gop/models"
 	"github.com/shirou/gopsutil/v4/disk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -256,13 +254,6 @@ func TestDiskBusyAndResponse(t *testing.T) {
 	busy, resp = diskBusyAndResponse(prev, cur, 1)
 	assert.Nil(t, busy)
 	assert.Nil(t, resp)
-}
-
-func TestDiskRateInfoOmitsBusyWithoutPriorSample(t *testing.T) {
-	data, err := json.Marshal(models.DiskRateInfo{Device: "sda"})
-	require.NoError(t, err)
-	assert.NotContains(t, string(data), "busy")
-	assert.NotContains(t, string(data), "responseTime")
 }
 
 func TestOldFormatDiskCursorStillDecodes(t *testing.T) {

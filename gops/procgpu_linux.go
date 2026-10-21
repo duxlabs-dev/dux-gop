@@ -14,9 +14,7 @@ type procGPUReader struct {
 	nvidiaVRAM map[int32]uint64
 }
 
-// newProcGPUReader prepares per-process reads against the GPUs named in
-// pciIds; none when it is empty. It runs nvidia-smi only for named, awake
-// NVIDIA GPUs.
+// newProcGPUReader reads only the GPUs named in pciIds, and runs nvidia-smi only for named, awake NVIDIA ones.
 func (self *GopsUtil) newProcGPUReader(pciIds []string) *procGPUReader {
 	entries, _ := self.detectGPUEntries()
 	return buildProcGPUReader(pciDevicesRoot, gpusFromEntries(entries), pciIds, queryNvidiaPIDs)
@@ -57,15 +55,11 @@ func (self *procGPUReader) fromScan(pid int32, scan procFDScan) procGPU {
 	return res
 }
 
-// procGPUUsage is the busy percent of one process's clients since the
-// previous sample: max over all engines, and max over the video engines.
 func procGPUUsage(prev []gpuCursorClient, cur drmClientSet, elapsed time.Duration) (all, video float64) {
 	engines := drmEngineUtilization(cursorClientSet(prev), cur, elapsed)
 	return maxEngineUtilization(engines), maxVideoEngineUtilization(engines)
 }
 
-// cursorClients returns the clients with at least one nonzero engine counter;
-// an absent engine rates the same as one at zero.
 func cursorClients(clients drmClientSet) []gpuCursorClient {
 	result := make([]gpuCursorClient, 0, len(clients))
 	for _, client := range clients {
@@ -86,8 +80,7 @@ func toCursorClient(client drmClient) gpuCursorClient {
 	return c
 }
 
-// cursorClientSet restores a previous sample. Only the current sample's
-// HasBusy and Capacity are used for rating, so these are left at defaults.
+// cursorClientSet restores a previous sample; only HasBusy and Capacity of the current one are used.
 func cursorClientSet(clients []gpuCursorClient) drmClientSet {
 	set := drmClientSet{}
 	for _, c := range clients {

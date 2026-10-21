@@ -204,12 +204,10 @@ type procBasics struct {
 	RSS                          uint64
 }
 
-// pssMaxAge bounds how stale a cached Pss_Dirty can be; it is also re-read
-// once RSS moves by more than 5%.
+// pssMaxAge bounds how stale a cached Pss_Dirty can be; RSS moving more than 5% also refreshes it.
 const pssMaxAge = 30 * time.Second
 
-// pssCache keeps Pss_Dirty per process, since smaps_rollup walks the page
-// tables and costs milliseconds for a large process.
+// pssCache keeps Pss_Dirty per process: smaps_rollup costs milliseconds for a large process.
 type pssCache struct {
 	mu      sync.Mutex
 	entries map[int32]pssEntry
@@ -296,9 +294,7 @@ func (self *GopsUtil) GetProcessesWithCursor(sortBy ProcSortBy, limit int, enabl
 	return self.GetProcessesWithOptions(ProcessOptions{SortBy: sortBy, Limit: limit, EnableCPU: enableCPU, Cursor: cursor, MergeChildren: mergeChildren})
 }
 
-// ProcessOptions selects the process list. GPU adds GPU usage and VRAM, IO
-// adds disk read/write rates, Net adds connections and TCP rates;
-// each costs extra reads per process.
+// ProcessOptions selects the process list. GPU, IO and Net each cost extra reads per process.
 type ProcessOptions struct {
 	SortBy        ProcSortBy
 	Limit         int
@@ -330,7 +326,6 @@ func (self ProcessOptions) effectiveSort() ProcSortBy {
 	return self.SortBy
 }
 
-// processExtras reads the optional per-process counters into a sample.
 type processExtras struct {
 	gpu *procGPUReader
 	net *procNetReader

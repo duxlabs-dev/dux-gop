@@ -70,7 +70,6 @@ func (self *GopsUtil) GetProcessDetail(pid int32) (*models.ProcessDetail, error)
 	return d, nil
 }
 
-// fillStatusDetail takes the memory, context switch, affinity and id lines of /proc/<pid>/status.
 func fillStatusDetail(d *models.ProcessDetail, status string) {
 	d.RSSKB = procField(status, "VmRSS:")
 	d.RSSAnonKB = procField(status, "RssAnon:")
@@ -93,7 +92,6 @@ func fillStatusDetail(d *models.ProcessDetail, status string) {
 	}
 }
 
-// firstID returns the real id (first column) of a Uid:/Gid: status line.
 func firstID(status, key string) *int {
 	for _, l := range strings.Split(status, "\n") {
 		if v, ok := strings.CutPrefix(l, key); ok {
@@ -119,7 +117,6 @@ func readProcInt(path string) *int {
 	return &n
 }
 
-// cgroupPath returns the cgroup v2 path ("0::/user.slice/...").
 func cgroupPath(text string) string {
 	for _, line := range strings.Split(text, "\n") {
 		if p, ok := strings.CutPrefix(line, "0::"); ok {
@@ -147,7 +144,7 @@ func schedPolicy(n int) string {
 	return ""
 }
 
-// ttyName decodes the stat tty_nr device number; 0 (no terminal) and other majors give "".
+// ttyName decodes the stat tty_nr device number.
 func ttyName(nr int) string {
 	major, minor := nr>>8&0xfff, nr&0xff|nr>>12&0xfff00
 	switch {
@@ -188,7 +185,6 @@ func decodeIOPrio(v, nice int) (string, *int) {
 	return class, &level
 }
 
-// procField parses the numeric value after key in a "key value" /proc file.
 func procField(text, key string) *uint64 {
 	for _, line := range strings.Split(text, "\n") {
 		if !strings.HasPrefix(line, key) {
@@ -260,7 +256,6 @@ func parseListenTable(text, proto string, ipv6 bool, inodes map[uint32]bool) []m
 	return out
 }
 
-// parseHexAddr decodes the host-endian 32-bit words of a /proc/net address.
 func parseHexAddr(h string, ipv6 bool) (netip.Addr, bool) {
 	n := 4
 	if ipv6 {
@@ -308,7 +303,6 @@ func listeningSockets(netDir string, inodes []uint32) []models.ListenSocket {
 	return slices.Compact(out)
 }
 
-// flatpakAppID returns the name= value of the [Application] section.
 func flatpakAppID(info string) string {
 	in := false
 	sc := bufio.NewScanner(strings.NewReader(info))
@@ -323,7 +317,6 @@ func flatpakAppID(info string) string {
 	return ""
 }
 
-// sandboxFromCgroup finds a snap or container unit in the cgroup paths.
 func sandboxFromCgroup(text string) *models.Sandbox {
 	var container *models.Sandbox
 	for _, seg := range strings.FieldsFunc(text, func(r rune) bool { return r == '/' || r == '\n' }) {
@@ -371,7 +364,6 @@ var capNames = [...]string{
 	"cap_block_suspend", "cap_audit_read", "cap_perfmon", "cap_bpf", "cap_checkpoint_restore",
 }
 
-// parsePrivileges reads the Uid and CapEff lines of /proc/<pid>/status.
 func parsePrivileges(status string) *models.Privileges {
 	p := &models.Privileges{}
 	euid := uint64(0)

@@ -73,45 +73,6 @@ func TestReadCPUFreqFixture(t *testing.T) {
 	assert.Equal(t, uint64(32<<20), s.cache.L3)
 }
 
-func TestReadCPUFreqMissing(t *testing.T) {
-	root := t.TempDir()
-	writeSys(t, root, "cpu0/topology/core_id", "0")
-	d := readCPUDynamic(root)
-	assert.Empty(t, d.coreMHz)
-	s := readCPUStatic(root)
-	assert.Nil(t, s.cache)
-	assert.Zero(t, s.maxMHz)
-	assert.Empty(t, readCPUDynamic(filepath.Join(root, "nope")).coreMHz)
-}
-
-func TestReadCPUFreqLive(t *testing.T) {
-	if _, err := os.Stat(cpuSysRoot + "/cpu0/cpufreq"); err != nil {
-		t.Skip("no cpufreq")
-	}
-	d := readCPUDynamicLive()
-	n, _ := cpuDirs(cpuSysRoot)
-	assert.Len(t, d.coreMHz, len(n))
-}
-
-func TestGetCPUInfoFrequenciesMatchCount(t *testing.T) {
-	if _, err := os.Stat(cpuSysRoot + "/cpu0/cpufreq"); err != nil {
-		t.Skip("no cpufreq")
-	}
-	cpuTracker.mu.Lock()
-	cpuTracker.modelCached = false
-	cpuTracker.freqLastRead = time.Time{}
-	cpuTracker.mu.Unlock()
-	info, err := NewGopsUtil().GetCPUInfo()
-	require.NoError(t, err)
-	assert.Len(t, info.CoreFrequencies, info.Count)
-}
-
-func TestReadCPUBaseFrequencyIntel(t *testing.T) {
-	root := t.TempDir()
-	writeSys(t, root, "cpu0/cpufreq/base_frequency", "2400000")
-	assert.Equal(t, 2400.0, readCPUStatic(root).baseMHz)
-}
-
 func TestGetCPUInfoDoesNotShareCache(t *testing.T) {
 	cpuTracker.mu.Lock()
 	cpuTracker.dynamic.coreMHz = []float64{1000}

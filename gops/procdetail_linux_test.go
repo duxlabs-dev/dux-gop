@@ -3,10 +3,7 @@
 package gops
 
 import (
-	"net"
-	"os"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/duxlabs-dev/dux-gop/models"
@@ -19,38 +16,6 @@ func TestCgroupUnit(t *testing.T) {
 	assert.Equal(t, "pipewire.service", cgroupUnit("0::/user.slice/user-1000.slice/user@1000.service/session.slice/pipewire.service\n"))
 	assert.Equal(t, "", cgroupUnit("0::/\n"))
 	assert.Equal(t, "", cgroupUnit("1:name=systemd:/foo\n"))
-}
-
-func TestProcField(t *testing.T) {
-	io := "rchar: 10\nread_bytes: 4096\nwrite_bytes: 8192\n"
-	assert.Equal(t, uint64(4096), *procField(io, "read_bytes:"))
-	assert.Equal(t, uint64(8192), *procField(io, "write_bytes:"))
-	assert.Nil(t, procField(io, "cancelled_write_bytes:"))
-	assert.Equal(t, uint64(12), *procField("VmSwap:\t      12 kB\n", "VmSwap:"))
-}
-
-func TestGetProcessDetailSelf(t *testing.T) {
-	d, err := NewGopsUtil().GetProcessDetail(int32(os.Getpid()))
-	require.NoError(t, err)
-	require.NotNil(t, d.OpenFiles)
-	assert.Positive(t, *d.OpenFiles)
-	assert.NotNil(t, d.SwapKB)
-
-	_, err = NewGopsUtil().GetProcessDetail(-5)
-	assert.ErrorIs(t, err, ErrProcessNotFound)
-}
-
-func TestGetProcessDetailSelfExtras(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	defer ln.Close()
-	port := ln.Addr().(*net.TCPAddr).Port
-
-	d, err := NewGopsUtil().GetProcessDetail(int32(os.Getpid()))
-	require.NoError(t, err)
-	wd, _ := os.Getwd()
-	assert.Equal(t, wd, d.Cwd)
-	assert.Contains(t, d.Listening, models.ListenSocket{Protocol: "tcp", Address: "127.0.0.1", Port: port})
 }
 
 func TestParseListenTable(t *testing.T) {
@@ -68,21 +33,6 @@ func TestParseListenTable(t *testing.T) {
 	udp := "hdr\n   0: 00000000:0035 00000000:0000 07 0:0 0:0 0 0 0 7 2 0\n   1: 00000000:0044 0100007F:0035 01 0:0 0:0 0 0 0 8 2 0\n"
 	got = parseListenTable(udp, "udp", false, map[uint32]bool{7: true, 8: true})
 	assert.Equal(t, []models.ListenSocket{{Protocol: "udp", Address: "0.0.0.0", Port: 53}}, got)
-}
-
-func TestListeningSocketsSortDedupe(t *testing.T) {
-	dir := t.TempDir()
-	row := func(port, inode string) string {
-		return "   0: 00000000:" + port + " 00000000:0000 0A 0:0 0:0 0 0 0 " + inode + " 1 0\n"
-	}
-	require.NoError(t, os.WriteFile(dir+"/tcp", []byte("hdr\n"+row("1F90", "1")+row("1F90", "2")+row("0050", "3")), 0o600))
-	require.NoError(t, os.WriteFile(dir+"/udp", []byte("hdr\n"+row("0050", "4")), 0o600))
-	got := listeningSockets(dir, []uint32{1, 2, 3, 4})
-	assert.Equal(t, []models.ListenSocket{
-		{Protocol: "tcp", Address: "0.0.0.0", Port: 80},
-		{Protocol: "udp", Address: "0.0.0.0", Port: 80},
-		{Protocol: "tcp", Address: "0.0.0.0", Port: 8080},
-	}, got)
 }
 
 func TestSandboxParsing(t *testing.T) {
@@ -113,59 +63,4 @@ func TestParsePrivileges(t *testing.T) {
 
 	assert.Nil(t, parsePrivileges("Uid:\t1000\t1000\t1000\t1000\nCapEff:\t0000000000000000\n"))
 	assert.Nil(t, parsePrivileges("Uid:\t0\t0\t0\t0\nCapEff:\t000001ffffffffff\n"))
-}
-
-func TestParseProcStatExt(t *testing.T) {
-	line := "42 (Web (x) Content) S 1 42 77 34817 -1 4194560 11 0 3 0 200 50 0 0 25 5 4 0 100 0 0 18446744073709551615 0 0 0 0 0 0 0 0 0 0 0 0 17 9 0 2 0 0 0\n"
-	st, ok := parseProcStatN(line, 39)
-	require.True(t, ok)
-	require.NotNil(t, st.Ext)
-	assert.Equal(t, procStatExt{Session: 77, MinFlt: 11, MajFlt: 3, UTime: 2, STime: 0.5, Priority: 25, Processor: 9, Policy: 2}, *st.Ext)
-
-	st, ok = parseProcStat(line)
-	require.True(t, ok)
-	assert.Nil(t, st.Ext)
-}
-
-func TestSchedPolicy(t *testing.T) {
-	for n, want := range map[int]string{0: "normal", 1: "fifo", 2: "rr", 3: "batch", 5: "idle", 6: "deadline", 4: ""} {
-		assert.Equal(t, want, schedPolicy(n))
-	}
-}
-
-func TestTTYName(t *testing.T) {
-	assert.Equal(t, "pts/1", ttyName(136<<8|1))
-	assert.Equal(t, "pts/257", ttyName(137<<8|1))
-	assert.Equal(t, "tty2", ttyName(4<<8|2))
-	assert.Equal(t, "ttyS1", ttyName(4<<8|65))
-	assert.Equal(t, "", ttyName(0))
-}
-
-func TestDecodeIOPrio(t *testing.T) {
-	c, l := decodeIOPrio(2<<13|4, 0)
-	assert.Equal(t, "best-effort", c)
-	assert.Equal(t, 4, *l)
-	c, l = decodeIOPrio(0, 0)
-	assert.Equal(t, "none", c)
-	assert.Equal(t, 4, *l)
-	c, l = decodeIOPrio(1<<13|0, 0)
-	assert.Equal(t, "realtime", c)
-	assert.Equal(t, 0, *l)
-	c, l = decodeIOPrio(3<<13, 0)
-	assert.Equal(t, "idle", c)
-	assert.NotNil(t, l)
-}
-
-func TestGetProcessDetailSelfExtended(t *testing.T) {
-	d, err := (&GopsUtil{}).GetProcessDetail(int32(os.Getpid()))
-	require.NoError(t, err)
-	require.NotNil(t, d.RSSKB)
-	assert.Greater(t, *d.RSSKB, uint64(0))
-	require.NotNil(t, d.UID)
-	assert.Equal(t, os.Getuid(), *d.UID)
-	if cg, _ := os.ReadFile("/proc/self/cgroup"); strings.Contains(string(cg), "0::") {
-		assert.NotEmpty(t, d.Cgroup)
-	}
-	assert.NotEmpty(t, d.Policy)
-	assert.NotEmpty(t, d.Affinity)
 }

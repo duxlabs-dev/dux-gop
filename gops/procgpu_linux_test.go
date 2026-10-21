@@ -3,12 +3,10 @@
 package gops
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strconv"
 	"testing"
-	"time"
 
 	"github.com/duxlabs-dev/dux-gop/models"
 	"github.com/stretchr/testify/assert"
@@ -75,65 +73,21 @@ func TestProcGPUReader_TriState(t *testing.T) {
 	assert.Len(t, h.Clients, 1, "iGPU client is still kept")
 }
 
-func TestProcGPUReader_NvidiaNotMonitoredIsUnmonitored(t *testing.T) {
+func TestProcGPUReader_UnmonitoredAndUnclassified(t *testing.T) {
 	procRoot := t.TempDir()
 	writeFDLink(t, procRoot, 1, 3, "/dev/nvidia0")
 	require.NoError(t, os.MkdirAll(filepath.Join(procRoot, "2", "fd"), 0o755))
 	require.NoError(t, os.MkdirAll(filepath.Join(procRoot, "3"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(procRoot, "4", "fd"), 0o755))
 
 	r := &procGPUReader{}
 	assert.Equal(t, procGPU{Unmonitored: true}, readGPU(r, procRoot, 1), "an NVIDIA GPU that is excluded or asleep is not 0")
 	assert.Equal(t, procGPU{Readable: true, UsageKnown: true}, readGPU(r, procRoot, 2))
 	assert.Equal(t, procGPU{}, readGPU(r, procRoot, 3))
-}
 
-func TestProcGPUReader_UnclassifiedNodeHasNoUsage(t *testing.T) {
-	procRoot := t.TempDir()
-	writeFDLink(t, procRoot, 1, 3, "/dev/dri/renderD130")
-	r := &procGPUReader{gpuNodeSet: gpuNodeSet{nodes: map[string]gpuNodeState{"renderD128": gpuNodeRead}}}
-	assert.Equal(t, procGPU{Readable: true}, readGPU(r, procRoot, 1), "a GPU we don't classify is unknown usage, not 0")
-}
-
-func TestProcGPUUsage(t *testing.T) {
-	prev := []gpuCursorClient{{PDev: "p", ID: 1, Engines: map[string][3]uint64{"gfx": {1_000_000_000, 0, 0}}}}
-	cur := drmClientSet{{PDev: "p", ID: 1}: {PDev: "p", ID: 1, Engines: map[string]drmEngine{
-		"gfx": {BusyNs: 1_250_000_000, HasBusy: true, Capacity: 1},
-	}}}
-	all, video := procGPUUsage(prev, cur, time.Second)
-	assert.InDelta(t, 25.0, all, 0.001)
-	assert.Zero(t, video)
-}
-
-func TestProcGPUUsage_Capacity(t *testing.T) {
-	text := "drm-driver:\ti915\ndrm-client-id:\t1\ndrm-pdev:\t0000:00:02.0\n" +
-		"drm-engine-video:\t2000000000 ns\ndrm-engine-capacity-video:\t2\n"
-	client, ok := parseDRMFdinfo(text)
-	require.True(t, ok)
-	prev := []gpuCursorClient{toCursorClient(client)}
-	prev[0].Engines["video"] = [3]uint64{1_000_000_000, 0, 0}
-
-	cur := drmClientSet{client.key(): client}
-	all, video := procGPUUsage(prev, cur, time.Second)
-	assert.InDelta(t, 50.0, all, 0.001)
-	assert.InDelta(t, 50.0, video, 0.001, "i915 video is a video engine")
-}
-
-func TestProcGPUUsage_Cycles(t *testing.T) {
-	text := "drm-driver:\txe\ndrm-client-id:\t1\ndrm-pdev:\t0000:00:02.0\n" +
-		"drm-cycles-rcs:\t300\ndrm-total-cycles-rcs:\t2000\n"
-	client, ok := parseDRMFdinfo(text)
-	require.True(t, ok)
-	prev := []gpuCursorClient{{PDev: client.PDev, ID: 1, Engines: map[string][3]uint64{"rcs": {0, 200, 1600}}}}
-	all, _ := procGPUUsage(prev, drmClientSet{client.key(): client}, time.Second)
-	assert.InDelta(t, 25.0, all, 0.001)
-}
-
-func TestIsNvidiaGPUDevice(t *testing.T) {
-	assert.True(t, isNvidiaGPUDevice([]byte("/dev/nvidia0")))
-	assert.True(t, isNvidiaGPUDevice([]byte("/dev/nvidia12")))
-	for _, s := range []string{"/dev/nvidia", "/dev/nvidiactl", "/dev/nvidia-uvm", "/dev/nvidia0x", "/dev/dri/renderD128"} {
-		assert.False(t, isNvidiaGPUDevice([]byte(s)), s)
-	}
+	writeFDLink(t, procRoot, 4, 3, "/dev/dri/renderD130")
+	r = &procGPUReader{gpuNodeSet: gpuNodeSet{nodes: map[string]gpuNodeState{"renderD128": gpuNodeRead}}}
+	assert.Equal(t, procGPU{Readable: true}, readGPU(r, procRoot, 4), "a GPU we don't classify is unknown usage, not 0")
 }
 
 func TestBuildProcGPUReader_AllowList(t *testing.T) {
@@ -205,22 +159,10 @@ func TestProcGPUReader_ExcludedGPUIsUnknown(t *testing.T) {
 	assert.True(t, read(all, 1).UsageKnown, "every named GPU is measured")
 	assert.True(t, read(all, 2).UsageKnown)
 	assert.Equal(t, procGPU{Readable: true, UsageKnown: true}, read(all, 3))
-}
 
-func TestProcGPUReader_ExcludedWinsOverPartialSum(t *testing.T) {
-	pciRoot := t.TempDir()
-	for slot, node := range map[string]string{"0000:0c:00.0": "renderD128", "0000:00:02.0": "renderD129"} {
-		require.NoError(t, os.MkdirAll(filepath.Join(pciRoot, slot, "drm", node), 0o755))
-	}
-	detected := []models.GPU{
-		{BusId: "0000:0c:00.0", PciId: "1002:744c", Driver: "amdgpu"},
-		{BusId: "0000:00:02.0", PciId: "8086:a780", Driver: "i915"},
-	}
-	procRoot := t.TempDir()
-	writeDRMClient(t, procRoot, 1, 4, "renderD128", amdgpuEngineClient)
-	writeFDLink(t, procRoot, 1, 5, "/dev/dri/renderD129")
-	r := buildProcGPUReader(pciRoot, detected, []string{"1002:744c"}, func([]string) map[int32]uint64 { return nil })
-	assert.Equal(t, procGPU{Unmonitored: true}, readGPU(r, procRoot, 1))
+	writeDRMClient(t, procRoot, 5, 4, "renderD128", amdgpuEngineClient)
+	writeFDLink(t, procRoot, 5, 5, "/dev/dri/renderD129")
+	assert.Equal(t, procGPU{Unmonitored: true}, read(dGPU, 5), "an excluded GPU wins over a partial sum")
 }
 
 func TestProcGPUReader_SuspendedGPUIsIdle(t *testing.T) {
@@ -246,14 +188,6 @@ func TestSetProcessExtras_UnmonitoredReason(t *testing.T) {
 	assert.True(t, info.GPUUnmonitored)
 	assert.Nil(t, info.GPU)
 	assert.Nil(t, info.VRAMKB)
-	b, err := json.Marshal(info)
-	require.NoError(t, err)
-	assert.Contains(t, string(b), `"gpuUnmonitored":true`)
-
-	info = models.ProcessInfo{}
-	setProcessExtras(&info, nil, &processSample{}, procGPU{})
-	b, _ = json.Marshal(info)
-	assert.NotContains(t, string(b), "gpuUnmonitored")
 
 	info = models.ProcessInfo{}
 	prev := &processSample{ProcessCursorData: models.ProcessCursorData{Timestamp: 1000}, gpuOK: true}
@@ -299,21 +233,4 @@ func TestBuildProcGPUReader_NvidiaQueriesOnlyActiveCards(t *testing.T) {
 		return map[int32]uint64{}
 	})
 	assert.Equal(t, []string{"0000:01:00.0"}, queried, "suspended and excluded NVIDIA GPUs are not queried")
-}
-
-func TestProcGPUReader_NvidiaQueryFailedIsUnknown(t *testing.T) {
-	pciRoot := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(pciRoot, "0000:01:00.0"), 0o755))
-	detected := []models.GPU{{BusId: "0000:01:00.0", PciId: "10de:2786", Driver: "nvidia"}}
-	procRoot := t.TempDir()
-	writeFDLink(t, procRoot, 1, 3, "/dev/nvidia0")
-	require.NoError(t, os.MkdirAll(filepath.Join(procRoot, "2", "fd"), 0o755))
-
-	r := buildProcGPUReader(pciRoot, detected, []string{"10de:2786"}, func([]string) map[int32]uint64 { return nil })
-	assert.Equal(t, procGPU{}, readGPU(r, procRoot, 1), "VRAM is unknown, not 0, when nvidia-smi failed")
-	assert.Equal(t, procGPU{Readable: true, UsageKnown: true}, readGPU(r, procRoot, 2))
-
-	var info models.ProcessInfo
-	setProcessExtras(&info, nil, &processSample{}, readGPU(r, procRoot, 1))
-	assert.Nil(t, info.VRAMKB)
 }

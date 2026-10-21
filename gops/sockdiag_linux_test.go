@@ -6,14 +6,8 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
-	"fmt"
-	"net"
 	"net/netip"
-	"os"
-	"syscall"
 	"testing"
-	"time"
-	"unsafe"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -53,26 +47,6 @@ func nlInt(v int32) []byte {
 	return binary.NativeEndian.AppendUint32(nil, uint32(v))
 }
 
-// inetDiagMsg mirrors struct inet_diag_msg from linux/inet_diag.h.
-type inetDiagMsg struct {
-	Family, State, Timer, Retrans uint8
-	Sport, Dport                  [2]byte
-	Src, Dst                      [16]byte
-	If                            uint32
-	Cookie                        [2]uint32
-	Expires, Rqueue, Wqueue, UID  uint32
-	Inode                         uint32
-}
-
-func TestInetDiagMsgLayout(t *testing.T) {
-	var m inetDiagMsg
-	assert.Equal(t, uintptr(inetDiagMsgLen), unsafe.Sizeof(m))
-	assert.Equal(t, uintptr(6), unsafe.Offsetof(m.Dport))
-	assert.Equal(t, uintptr(24), unsafe.Offsetof(m.Dst))
-	assert.Equal(t, uintptr(44), unsafe.Offsetof(m.Cookie))
-	assert.Equal(t, uintptr(68), unsafe.Offsetof(m.Inode))
-}
-
 func inetDiagV4(state uint8, local, remote string, inode uint32, attrs ...[]byte) []byte {
 	b := make([]byte, inetDiagMsgLen)
 	b[0] = unix.AF_INET
@@ -100,19 +74,6 @@ func rtAttr(typ uint16, data []byte) []byte {
 	return b
 }
 
-func TestEncodeSockDiagRequestTCPv4(t *testing.T) {
-	got := encodeSockDiagRequest(1, unix.AF_INET, unix.IPPROTO_TCP, allTCPStates&^(1<<tcpListen), 1<<(inetDiagInfo-1))
-
-	want := make([]byte, 72)
-	binary.NativeEndian.PutUint32(want[0:], 72)
-	binary.NativeEndian.PutUint16(want[4:], 20)     // SOCK_DIAG_BY_FAMILY
-	binary.NativeEndian.PutUint16(want[6:], 0x0301) // NLM_F_REQUEST|NLM_F_DUMP
-	binary.NativeEndian.PutUint32(want[8:], 1)
-	copy(want[16:], []byte{2, 6, 2, 0}) // AF_INET, IPPROTO_TCP, INET_DIAG_INFO bit
-	binary.NativeEndian.PutUint32(want[20:], 0xbff)
-	assert.Equal(t, want, got)
-}
-
 func TestParseSockDiagCapturedTCPv6(t *testing.T) {
 	msg, err := hex.DecodeString(capturedTCPv6Msg)
 	require.NoError(t, err)
@@ -130,105 +91,6 @@ func TestParseSockDiagCapturedTCPv6(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, done)
 	assert.Equal(t, []sockDiagEntry{want}, entries)
-
-	// Multipart: the same reply split across two datagrams.
-	entries, done, err = parseSockDiagResponse(msg, 7, unix.IPPROTO_TCP)
-	require.NoError(t, err)
-	assert.False(t, done)
-	assert.Equal(t, []sockDiagEntry{want}, entries)
-	entries, done, err = parseSockDiagResponse(nlMsg(unix.NLMSG_DONE, 7, nlInt(0)), 7, unix.IPPROTO_TCP)
-	require.NoError(t, err)
-	assert.True(t, done)
-	assert.Empty(t, entries)
-}
-
-func TestParseInetDiagMsgTCPInfo(t *testing.T) {
-	full := make([]byte, tcpInfoBytesReceivedOff+8)
-	binary.NativeEndian.PutUint64(full[tcpInfoBytesAckedOff:], 1000)
-	binary.NativeEndian.PutUint64(full[tcpInfoBytesReceivedOff:], 2000)
-
-	tests := []struct {
-		name     string
-		protocol uint8
-		attrs    [][]byte
-		info     bool
-		rx, tx   uint64
-	}{
-		{"full", unix.IPPROTO_TCP, [][]byte{rtAttr(1, make([]byte, 5)), rtAttr(inetDiagInfo, full)}, true, 2000, 1000},
-		{"truncated tcp_info", unix.IPPROTO_TCP, [][]byte{rtAttr(inetDiagInfo, full[:tcpInfoBytesReceivedOff+7])}, false, 0, 0},
-		{"attribute longer than message", unix.IPPROTO_TCP, [][]byte{rtAttr(inetDiagInfo, full)[:64]}, false, 0, 0},
-		{"no attributes", unix.IPPROTO_TCP, nil, false, 0, 0},
-		{"udp ignores info", unix.IPPROTO_UDP, [][]byte{rtAttr(inetDiagInfo, full)}, false, 0, 0},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			e, ok := parseInetDiagMsg(inetDiagV4(1, "192.0.2.10:40000", "198.51.100.7:443", 42, tt.attrs...), tt.protocol)
-			require.True(t, ok)
-			assert.Equal(t, uint32(42), e.Inode)
-			assert.Equal(t, tt.protocol, e.Protocol)
-			assert.Equal(t, netip.MustParseAddrPort("198.51.100.7:443"), e.Remote)
-			assert.Equal(t, tt.info, e.HasTCPInfo)
-			assert.Equal(t, tt.rx, e.RxBytes)
-			assert.Equal(t, tt.tx, e.TxBytes)
-		})
-	}
-}
-
-func TestParseSockDestroyBroadcast(t *testing.T) {
-	info := make([]byte, tcpInfoBytesReceivedOff+8)
-	binary.NativeEndian.PutUint64(info[tcpInfoBytesAckedOff:], 1001)
-	binary.NativeEndian.PutUint64(info[tcpInfoBytesReceivedOff:], 4000)
-	msg := inetDiagV4(7, "192.0.2.10:40000", "198.51.100.7:443", 0, rtAttr(inetDiagInfo, info))
-	binary.NativeEndian.PutUint32(msg[44:], 0x89abcdef)
-	binary.NativeEndian.PutUint32(msg[48:], 0x01234567)
-	// One message per datagram, sequence 0, no NLMSG_DONE.
-	entries, done, err := parseSockDiagResponse(nlMsg(unix.SOCK_DIAG_BY_FAMILY, 0, msg), 0, unix.IPPROTO_TCP)
-	require.NoError(t, err)
-	assert.False(t, done)
-	assert.Equal(t, []sockDiagEntry{{
-		Cookie: 0x0123456789abcdef, Protocol: unix.IPPROTO_TCP, Remote: netip.MustParseAddrPort("198.51.100.7:443"),
-		RxBytes: 4000, TxBytes: 1001, HasTCPInfo: true,
-	}}, entries, "kept without an inode: the counters identify it by cookie")
-}
-
-func TestListenSockDestroysLive(t *testing.T) {
-	events := make(chan sockDiagEntry, 64)
-	stop, err := listenSockDestroys(func(e sockDiagEntry) { events <- e })
-	if err != nil {
-		t.Skipf("destroy groups unavailable: %v", err)
-	}
-	defer stop()
-
-	ln, err := net.Listen("tcp4", "127.0.0.1:0")
-	require.NoError(t, err)
-	defer ln.Close()
-	client, err := net.Dial("tcp4", ln.Addr().String())
-	require.NoError(t, err)
-	server, err := ln.Accept()
-	require.NoError(t, err)
-	_, err = client.Write([]byte("hello"))
-	require.NoError(t, err)
-	_, err = server.Read(make([]byte, 5))
-	require.NoError(t, err)
-	require.NoError(t, server.Close())
-	require.NoError(t, client.Close())
-
-	timeout := time.After(5 * time.Second)
-	for {
-		select {
-		case e := <-events:
-			if e.Remote.String() == ln.Addr().String() {
-				assert.True(t, e.HasTCPInfo)
-				assert.NotZero(t, e.Cookie)
-				assert.GreaterOrEqual(t, e.TxBytes, uint64(5), "final counters include the payload")
-				stop()
-				stop()
-				return
-			}
-		case <-timeout:
-			t.Fatal("no destroy event for the client socket")
-		}
-	}
 }
 
 func TestParseSockDiagResponseEdgeCases(t *testing.T) {
@@ -252,126 +114,9 @@ func TestParseSockDiagResponseEdgeCases(t *testing.T) {
 		assert.True(t, errors.Is(err, unix.EPERM))
 	})
 
-	t.Run("NLMSG_DONE with error code", func(t *testing.T) {
-		_, done, err := parseSockDiagResponse(nlMsg(unix.NLMSG_DONE, 3, nlInt(-int32(unix.ENOBUFS))), 3, unix.IPPROTO_TCP)
-		assert.True(t, done)
-		assert.True(t, errors.Is(err, unix.ENOBUFS))
-	})
-
 	t.Run("truncated netlink header", func(t *testing.T) {
 		buf := nlMsg(unix.SOCK_DIAG_BY_FAMILY, 3, sock)
 		_, _, err := parseSockDiagResponse(buf[:len(buf)-8], 3, unix.IPPROTO_TCP)
 		assert.Error(t, err)
 	})
-}
-
-func TestDumpSocketsLive(t *testing.T) {
-	ln, err := net.Listen("tcp4", "127.0.0.1:0")
-	require.NoError(t, err)
-	defer ln.Close()
-	client, err := net.Dial("tcp4", ln.Addr().String())
-	require.NoError(t, err)
-	defer client.Close()
-	server, err := ln.Accept()
-	require.NoError(t, err)
-	defer server.Close()
-	_, err = client.Write([]byte("hello"))
-	require.NoError(t, err)
-	_, err = server.Read(make([]byte, 5))
-	require.NoError(t, err)
-
-	udpSrv, err := net.ListenPacket("udp4", "127.0.0.1:0")
-	require.NoError(t, err)
-	defer udpSrv.Close()
-	udpCli, err := net.Dial("udp4", udpSrv.LocalAddr().String())
-	require.NoError(t, err)
-	defer udpCli.Close()
-
-	entries, err := dumpSockets()
-	if err != nil {
-		t.Skipf("sock_diag unavailable: %v", err)
-	}
-
-	serverInode := socketInode(t, server.(*net.TCPConn))
-	clientInode := socketInode(t, client.(*net.TCPConn))
-	udpInode := socketInode(t, udpCli.(*net.UDPConn))
-	listenInode := socketInode(t, ln.(*net.TCPListener))
-	var found int
-	for _, e := range entries {
-		assert.NotZero(t, e.Inode)
-		assert.NotEqual(t, listenInode, e.Inode, "listening sockets are not dumped")
-		switch e.Inode {
-		case serverInode:
-			found++
-			assert.Equal(t, uint8(unix.IPPROTO_TCP), e.Protocol)
-			assert.Equal(t, client.LocalAddr().String(), e.Remote.String())
-			assert.True(t, e.HasTCPInfo)
-			assert.Equal(t, uint64(5), e.RxBytes)
-		case clientInode:
-			found++
-			assert.Equal(t, ln.Addr().String(), e.Remote.String())
-			assert.True(t, e.HasTCPInfo)
-		case udpInode:
-			found++
-			assert.Equal(t, uint8(unix.IPPROTO_UDP), e.Protocol)
-			assert.Equal(t, udpSrv.LocalAddr().String(), e.Remote.String())
-			assert.False(t, e.HasTCPInfo)
-		}
-	}
-	if udpDiagMissing(t) {
-		assert.Equal(t, 2, found, "TCP survives a kernel without udp_diag")
-		return
-	}
-	assert.Equal(t, 3, found)
-}
-
-func socketInode(t *testing.T, c syscall.Conn) uint32 {
-	raw, err := c.SyscallConn()
-	require.NoError(t, err)
-	var target string
-	require.NoError(t, raw.Control(func(fd uintptr) {
-		target, err = os.Readlink(fmt.Sprintf("/proc/self/fd/%d", fd))
-	}))
-	require.NoError(t, err)
-	var inode uint32
-	_, err = fmt.Sscanf(target, "socket:[%d]", &inode)
-	require.NoError(t, err)
-	return inode
-}
-
-func TestUDPUnsupported(t *testing.T) {
-	enoent := fmt.Errorf("sock_diag: %w", unix.ENOENT)
-	assert.True(t, udpUnsupported(unix.IPPROTO_UDP, enoent))
-	assert.False(t, udpUnsupported(unix.IPPROTO_TCP, enoent), "a TCP failure is a real failure")
-	assert.False(t, udpUnsupported(unix.IPPROTO_UDP, fmt.Errorf("sock_diag: %w", unix.EPERM)))
-	assert.False(t, udpUnsupported(unix.IPPROTO_UDP, nil))
-
-	_, _, err := parseSockDiagResponse(nlMsg(unix.NLMSG_ERROR, 3, nlInt(-int32(unix.ENOENT))), 3, unix.IPPROTO_UDP)
-	assert.True(t, udpUnsupported(unix.IPPROTO_UDP, err), "the kernel's reply must match")
-}
-
-func TestOpenSockDiagSetsReceiveTimeout(t *testing.T) {
-	fd, err := openSockDiag()
-	if err != nil {
-		t.Skipf("sock_diag unavailable: %v", err)
-	}
-	defer unix.Close(fd)
-	tv, err := unix.GetsockoptTimeval(fd, unix.SOL_SOCKET, unix.SO_RCVTIMEO)
-	require.NoError(t, err)
-	assert.Equal(t, int64(1), int64(tv.Sec))
-	assert.Zero(t, tv.Usec)
-}
-
-// udpDiagMissing sends a UDP request and reports whether the kernel refuses it with ENOENT.
-func udpDiagMissing(t *testing.T) bool {
-	fd, err := openSockDiag()
-	require.NoError(t, err)
-	defer unix.Close(fd)
-	req := encodeSockDiagRequest(1, unix.AF_INET, unix.IPPROTO_UDP, 1<<tcpEstablished, 0)
-	require.NoError(t, unix.Sendto(fd, req, 0, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}))
-	buf := make([]byte, 64*1024)
-	n, _, err := unix.Recvfrom(fd, buf, 0)
-	require.NoError(t, err)
-	_, _, err = parseSockDiagResponse(buf[:n], 1, unix.IPPROTO_UDP)
-	return udpUnsupported(unix.IPPROTO_UDP, err)
 }

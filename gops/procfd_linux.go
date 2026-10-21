@@ -71,9 +71,7 @@ var (
 	socketPrefix = []byte("socket:[")
 )
 
-// scanProcFDs returns an error only when the fd directory itself is
-// unreadable, so callers can tell an unknown process from one without
-// matching fds.
+// scanProcFDs errors only when the fd directory is unreadable, so an unknown process differs from one without matching fds.
 func scanProcFDs(procRoot string, pid int32, nodes map[string]gpuNodeState, sockets bool) (procFDScan, error) {
 	pidDir := filepath.Join(procRoot, strconv.Itoa(int(pid)))
 	dir, err := os.Open(filepath.Join(pidDir, "fd"))

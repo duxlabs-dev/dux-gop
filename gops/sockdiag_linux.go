@@ -25,8 +25,7 @@ type sockDiagEntry struct {
 	HasTCPInfo bool
 }
 
-// Layouts of struct inet_diag_req_v2 and struct inet_diag_msg from
-// linux/inet_diag.h, which x/sys/unix does not define.
+// Layouts of inet_diag_req_v2 and inet_diag_msg (linux/inet_diag.h).
 const (
 	inetDiagReqV2Len = 56
 	inetDiagMsgLen   = 72
@@ -46,8 +45,7 @@ var (
 
 const sockDiagRecvTimeout = time.Second
 
-// openSockDiag opens a sock_diag netlink socket whose reads give up after
-// sockDiagRecvTimeout, so a stuck kernel dump cannot hang a request.
+// openSockDiag opens a sock_diag socket whose reads time out, so a stuck dump can't hang a request.
 func openSockDiag() (int, error) {
 	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW|unix.SOCK_CLOEXEC, unix.NETLINK_SOCK_DIAG)
 	if err != nil {
@@ -61,15 +59,13 @@ func openSockDiag() (int, error) {
 	return fd, nil
 }
 
-// udpUnsupported reports an ENOENT reply to a UDP request, which is what a
-// kernel without udp_diag answers; TCP results are still good.
+// udpUnsupported reports the ENOENT a kernel without udp_diag answers; TCP results are still good.
 func udpUnsupported(protocol uint8, err error) bool {
 	return protocol == unix.IPPROTO_UDP && errors.Is(err, unix.ENOENT)
 }
 
-// dumpSockets lists TCP (all states but LISTEN) and connected UDP sockets
-// of both address families through NETLINK_SOCK_DIAG. Sockets without an
-// inode are kept only with TCP counters (orphans, not TIME_WAIT).
+// dumpSockets lists TCP (all states but LISTEN) and connected UDP sockets. Sockets without
+// an inode are kept only with TCP counters.
 func dumpSockets() ([]sockDiagEntry, error) {
 	fd, err := openSockDiag()
 	if err != nil {
@@ -134,9 +130,8 @@ func encodeSockDiagRequest(seq uint32, family, protocol uint8, states uint32, ex
 	return b
 }
 
-// parseSockDiagResponse decodes one datagram of a dump, or with seq 0 of
-// destroy broadcasts. Messages from other sequence numbers are ignored; done
-// reports NLMSG_DONE.
+// parseSockDiagResponse decodes one dump datagram (seq 0 for destroy broadcasts),
+// ignoring other sequence numbers; done reports NLMSG_DONE.
 func parseSockDiagResponse(b []byte, seq uint32, protocol uint8) (entries []sockDiagEntry, done bool, err error) {
 	msgs, err := syscall.ParseNetlinkMessage(b)
 	if err != nil {
@@ -215,8 +210,8 @@ func parseInetDiagMsg(b []byte, protocol uint8) (sockDiagEntry, bool) {
 	return e, true
 }
 
-// listenSockDestroys calls emit with every TCP socket destroyed in our
-// network namespace, carrying its final counters, until stop is called.
+// listenSockDestroys emits every TCP socket destroyed in our network namespace, with
+// its final counters, until stop is called.
 func listenSockDestroys(emit func(sockDiagEntry)) (stop func(), err error) {
 	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW|unix.SOCK_CLOEXEC|unix.SOCK_NONBLOCK, unix.NETLINK_SOCK_DIAG)
 	if err != nil {

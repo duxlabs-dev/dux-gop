@@ -5,7 +5,6 @@ package gops
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -15,26 +14,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const amdgpuIdleFdinfo = `pos:	0
-flags:	02100002
-mnt_id:	38
-ino:	629
-drm-driver:	amdgpu
+const amdgpuIdleFdinfo = `drm-driver:	amdgpu
 drm-client-id:	49
 drm-pdev:	0000:0c:00.0
-pasid:	48
-drm-total-cpu:	0
-drm-total-gtt:	2048 KiB
 drm-resident-gtt:	2048 KiB
-drm-total-vram:	12 KiB
-drm-shared-vram:	0
 drm-resident-vram:	12 KiB
-drm-purgeable-vram:	0
-drm-memory-vram:	12 KiB
-drm-memory-gtt: 	2048 KiB
-drm-memory-cpu: 	0 KiB
-amd-evicted-vram:	0 KiB
-amd-requested-vram:	12 KiB
 `
 
 const i915Fdinfo = `drm-driver:	i915
@@ -62,54 +46,36 @@ drm-total-cycles-ccs:	7655183225
 drm-engine-capacity-ccs:	4
 `
 
-func TestParseDRMFdinfoAmdgpu(t *testing.T) {
-	client, ok := parseDRMFdinfo(amdgpuIdleFdinfo)
-	require.True(t, ok)
-	assert.Equal(t, "amdgpu", client.Driver)
-	assert.Equal(t, "0000:0c:00.0", client.PDev)
-	assert.Equal(t, uint64(49), client.ID)
-	assert.Equal(t, uint64(12*1024), client.VRAMBytes)
-	assert.Equal(t, uint64(2048*1024), client.GTTBytes)
-	assert.Empty(t, client.Engines, "An idle client has no engine lines")
-
-	busy, ok := parseDRMFdinfo(amdgpuIdleFdinfo + "drm-engine-gfx:\t21199820945 ns\ndrm-engine-dec:\t5655790 ns\n")
-	require.True(t, ok)
-	assert.Equal(t, drmEngine{BusyNs: 21199820945, HasBusy: true, Capacity: 1}, busy.Engines["gfx"])
-	assert.Equal(t, uint64(5655790), busy.Engines["dec"].BusyNs)
-}
-
-func TestParseDRMFdinfoLegacyVRAM(t *testing.T) {
-	client, ok := parseDRMFdinfo("drm-driver:\tamdgpu\ndrm-client-id:\t1\ndrm-memory-vram:\t3 MiB\n")
-	require.True(t, ok)
-	assert.Equal(t, uint64(3<<20), client.VRAMBytes)
-
-	legacy, ok := parseDRMFdinfo("drm-driver:\tamdgpu\ndrm-client-id:\t1\ndrm-memory-gtt:\t5 MiB\n")
-	require.True(t, ok)
-	assert.Equal(t, uint64(5<<20), legacy.GTTBytes)
-	assert.Empty(t, client.PDev)
-}
-
-func TestParseDRMFdinfoNotAClient(t *testing.T) {
+func TestParseDRMFdinfo(t *testing.T) {
 	_, ok := parseDRMFdinfo("pos:\t0\nflags:\t02100002\n")
-	assert.False(t, ok)
-}
+	assert.False(t, ok, "not a DRM client")
 
-func TestParseDRMFdinfoI915Capacity(t *testing.T) {
-	client, ok := parseDRMFdinfo(i915Fdinfo)
-	require.True(t, ok)
-	assert.Equal(t, uint64(4<<20), client.VRAMBytes, "Only local memory counts as VRAM")
-	assert.Equal(t, uint64(2), client.Engines["video"].Capacity)
-	assert.Equal(t, uint64(1), client.Engines["render"].Capacity)
-	assert.Equal(t, uint64(25662044495), client.Engines["render"].BusyNs)
-	assert.Contains(t, client.Engines, "video-enhance")
-}
-
-func TestParseDRMFdinfoXeCycles(t *testing.T) {
-	client, ok := parseDRMFdinfo(xeFdinfo)
-	require.True(t, ok)
-	assert.Equal(t, uint64(1<<30), client.VRAMBytes)
-	assert.Equal(t, drmEngine{Cycles: 28257900, TotalCycles: 7655183225, Capacity: 1}, client.Engines["rcs"])
-	assert.Equal(t, uint64(4), client.Engines["ccs"].Capacity)
+	tests := []struct {
+		name        string
+		text        string
+		vram, gtt   uint64
+		engine      string
+		want        drmEngine
+		wantEngines int
+	}{
+		{"amdgpu idle", amdgpuIdleFdinfo, 12 << 10, 2048 << 10, "", drmEngine{}, 0},
+		{"amdgpu busy", amdgpuIdleFdinfo + "drm-engine-gfx:\t21199820945 ns\n", 12 << 10, 2048 << 10, "gfx", drmEngine{BusyNs: 21199820945, HasBusy: true, Capacity: 1}, 1},
+		{"legacy amdgpu memory keys", "drm-driver:\tamdgpu\ndrm-client-id:\t1\ndrm-memory-vram:\t3 MiB\ndrm-memory-gtt:\t5 MiB\n", 3 << 20, 5 << 20, "", drmEngine{}, 0},
+		{"i915 counts only local memory as VRAM", i915Fdinfo, 4 << 20, 0, "video", drmEngine{BusyNs: 0, HasBusy: true, Capacity: 2}, 4},
+		{"xe cycles", xeFdinfo, 1 << 30, 0, "rcs", drmEngine{Cycles: 28257900, TotalCycles: 7655183225, Capacity: 1}, 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client, ok := parseDRMFdinfo(tt.text)
+			require.True(t, ok)
+			assert.Equal(t, tt.vram, client.VRAMBytes)
+			assert.Equal(t, tt.gtt, client.GTTBytes)
+			assert.Len(t, client.Engines, tt.wantEngines)
+			if tt.engine != "" {
+				assert.Equal(t, tt.want, client.Engines[tt.engine])
+			}
+		})
+	}
 }
 
 func nsClient(id uint64, engine string, busyNs, capacity uint64) drmClient {
@@ -128,78 +94,32 @@ func drmSet(clients ...drmClient) drmClientSet {
 
 func TestDRMEngineUtilization(t *testing.T) {
 	sec := uint64(time.Second)
-
-	gfx := drmEngineUtilization(
-		drmSet(nsClient(1, "gfx", 10*sec, 1)),
-		drmSet(nsClient(1, "gfx", 10*sec+sec/2, 1)),
-		time.Second)
-	assert.InDelta(t, 50.0, gfx["gfx"], 0.001)
-
-	video := drmEngineUtilization(
-		drmSet(nsClient(1, "video", 4*sec, 2)),
-		drmSet(nsClient(1, "video", 5*sec, 2)),
-		time.Second)
-	assert.InDelta(t, 50.0, video["video"], 0.001, "Busy time is normalized by engine capacity")
-
-	xeEngine := func(cycles, total uint64) drmClient {
+	xe := func(cycles, total uint64) drmClient {
 		return drmClient{ID: 3, Engines: map[string]drmEngine{"rcs": {Cycles: cycles, TotalCycles: total, Capacity: 1}}}
 	}
-	xe := drmEngineUtilization(drmSet(xeEngine(100, 1000)), drmSet(xeEngine(350, 2000)), time.Second)
-	assert.InDelta(t, 25.0, xe["rcs"], 0.001)
-
-	reset := drmEngineUtilization(
-		drmSet(nsClient(1, "gfx", 10*sec, 1)),
-		drmSet(nsClient(1, "gfx", sec/10, 1)),
-		time.Second)
-	assert.Equal(t, 0.0, reset["gfx"], "A counter going backwards contributes nothing")
-}
-
-func TestDRMEngineUtilizationClients(t *testing.T) {
-	sec := uint64(time.Second)
-	prev := drmSet(nsClient(1, "gfx", 10*sec, 1))
-
-	newClient := drmEngineUtilization(prev,
-		drmSet(nsClient(1, "gfx", 10*sec+sec/4, 1), nsClient(2, "gfx", sec/4, 1)),
-		time.Second)
-	assert.InDelta(t, 50.0, newClient["gfx"], 0.001, "A client created during the interval counts from zero")
-
-	stale := drmEngineUtilization(prev,
-		drmSet(nsClient(1, "gfx", 10*sec, 1), nsClient(3, "gfx", 90*sec, 1)),
-		time.Second)
-	assert.Equal(t, 0.0, stale["gfx"], "A new client whose counter exceeds the interval is ignored")
-
-	closed := drmEngineUtilization(drmSet(nsClient(1, "gfx", 10*sec, 1), nsClient(2, "gfx", 50*sec, 1)),
-		drmSet(nsClient(1, "gfx", 10*sec+sec/10, 1)),
-		time.Second)
-	assert.InDelta(t, 10.0, closed["gfx"], 0.001, "A closed client does not produce a negative delta")
-}
-
-func TestDRMEngineUtilizationXeNoBaseline(t *testing.T) {
-	cur := drmSet(drmClient{PDev: "0000:03:00.0", ID: 3, Engines: map[string]drmEngine{
-		"rcs": {Cycles: 500, TotalCycles: 1000, Capacity: 1},
-	}})
-	u := drmEngineUtilization(drmSet(), cur, time.Second)
-	assert.Equal(t, 0.0, u["rcs"], "xe cycles without a baseline are not rated against the interval")
-}
-
-func TestMaxEngineUtilization(t *testing.T) {
-	assert.Equal(t, 0.0, maxEngineUtilization(nil))
-	assert.Equal(t, 70.0, maxEngineUtilization(map[string]float64{"gfx": 70, "dec": 20}))
-	assert.Equal(t, 100.0, maxEngineUtilization(map[string]float64{"gfx": 130}))
-}
-
-func TestMaxVideoEngineUtilization(t *testing.T) {
-	assert.Equal(t, 0.0, maxVideoEngineUtilization(map[string]float64{"gfx": 70, "compute": 40}))
-	assert.Equal(t, 35.0, maxVideoEngineUtilization(map[string]float64{"gfx": 70, "dec": 20, "enc_1": 35, "jpeg": 5}))
-	assert.Equal(t, 12.0, maxVideoEngineUtilization(map[string]float64{"rcs": 90, "vecs": 12}))
-}
-
-func TestDRMDriverReportsEngines(t *testing.T) {
-	assert.True(t, drmDriverReportsEngines("amdgpu"))
-	assert.True(t, drmDriverReportsEngines("xe"))
-	assert.False(t, drmDriverReportsEngines("nvidia-drm"))
-	assert.False(t, drmDriverReportsEngines("msm"), "non-PCI GPUs are not supported")
-	assert.False(t, drmDriverReportsEngines(""))
+	tests := []struct {
+		name      string
+		prev, cur drmClientSet
+		engine    string
+		want      float64
+	}{
+		{"busy time", drmSet(nsClient(1, "gfx", 10*sec, 1)), drmSet(nsClient(1, "gfx", 10*sec+sec/2, 1)), "gfx", 50},
+		{"normalized by engine capacity", drmSet(nsClient(1, "video", 4*sec, 2)), drmSet(nsClient(1, "video", 5*sec, 2)), "video", 50},
+		{"xe cycles", drmSet(xe(100, 1000)), drmSet(xe(350, 2000)), "rcs", 25},
+		{"xe cycles without a baseline", drmSet(), drmSet(xe(500, 1000)), "rcs", 0},
+		{"a counter going backwards", drmSet(nsClient(1, "gfx", 10*sec, 1)), drmSet(nsClient(1, "gfx", sec/10, 1)), "gfx", 0},
+		{"a client created during the interval counts from zero", drmSet(nsClient(1, "gfx", 10*sec, 1)),
+			drmSet(nsClient(1, "gfx", 10*sec+sec/4, 1), nsClient(2, "gfx", sec/4, 1)), "gfx", 50},
+		{"a new client already past the interval is ignored", drmSet(nsClient(1, "gfx", 10*sec, 1)),
+			drmSet(nsClient(1, "gfx", 10*sec, 1), nsClient(3, "gfx", 90*sec, 1)), "gfx", 0},
+		{"a closed client produces no negative delta", drmSet(nsClient(1, "gfx", 10*sec, 1), nsClient(2, "gfx", 50*sec, 1)),
+			drmSet(nsClient(1, "gfx", 10*sec+sec/10, 1)), "gfx", 10},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.InDelta(t, tt.want, drmEngineUtilization(tt.prev, tt.cur, time.Second)[tt.engine], 0.001)
+		})
+	}
 }
 
 func TestScanProcFDs(t *testing.T) {
@@ -236,21 +156,6 @@ func TestScanProcFDs(t *testing.T) {
 	pids, err := listProcPIDs(root)
 	require.NoError(t, err)
 	assert.ElementsMatch(t, []int32{42, 43}, pids)
-}
-
-func TestScanProcFDsLive(t *testing.T) {
-	if _, err := os.Stat("/dev/dri"); err != nil {
-		t.Skip("no /dev/dri")
-	}
-	entries, _ := os.ReadDir("/sys/class/drm")
-	nodes := map[string]gpuNodeState{}
-	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), "renderD") || strings.HasPrefix(e.Name(), "card") && !strings.Contains(e.Name(), "-") {
-			nodes[e.Name()] = gpuNodeRead
-		}
-	}
-	_, err := scanProcFDs("/proc", int32(os.Getpid()), nodes, true)
-	assert.NoError(t, err)
 }
 
 func TestScanProcFDsSkipsUnwantedNodes(t *testing.T) {

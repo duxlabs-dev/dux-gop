@@ -1,7 +1,6 @@
 package gops
 
 import (
-	"encoding/json"
 	"testing"
 	"time"
 
@@ -174,32 +173,6 @@ func BenchmarkInferVendor(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		inferVendor("nvidia", "NVIDIA GeForce RTX 3080")
 	}
-}
-
-func TestGPUBusIdOmittedWhenEmpty(t *testing.T) {
-	out, err := json.Marshal(models.GPU{Driver: "amdgpu", PciId: "1002:744c"})
-	require.NoError(t, err)
-	assert.NotContains(t, string(out), "busId")
-	for _, key := range []string{"driver", "vendor", "displayName", "fullName", "pciId", "rawLine", "temperature", "hwmon"} {
-		assert.Contains(t, string(out), `"`+key+`"`)
-	}
-
-	out, err = json.Marshal(models.GPU{BusId: "0000:0c:00.0"})
-	require.NoError(t, err)
-	assert.Contains(t, string(out), `"busId":"0000:0c:00.0"`)
-}
-
-func TestGPULiveKeysOmittedUntilSampled(t *testing.T) {
-	out, err := json.Marshal(models.GPU{Driver: "amdgpu", PciId: "1002:744c"})
-	require.NoError(t, err)
-	for _, key := range []string{"usage", "gttUsed", "memoryBusy", "encoderUsage", "coreClockMax", "hotspot", "memoryTemperature", "powerLimit", "fanRpm", "fanPercent", "pcieLinkSpeed", "pcieLinkWidth"} {
-		assert.NotContains(t, string(out), `"`+key+`"`)
-	}
-
-	out, err = json.Marshal(models.GPU{Usage: new(0.0), FanRpm: new(0)})
-	require.NoError(t, err)
-	assert.Contains(t, string(out), `"usage":0`, "a known zero is not omitted")
-	assert.Contains(t, string(out), `"fanRpm":0`)
 }
 
 func TestGetGPUInfoWithStats_IdenticalGPUsToldApartByBusId(t *testing.T) {

@@ -53,8 +53,7 @@ var bootMillis = sync.OnceValue(func() int64 {
 	return int64(t) * 1000
 })
 
-// procReader reads /proc/<pid> files into one reused buffer, so it belongs
-// to one goroutine.
+// procReader reads /proc/<pid> files into one reused buffer, so it belongs to one goroutine.
 type procReader struct {
 	root string
 	buf  []byte
@@ -198,8 +197,7 @@ func (self *procReader) diskBytes(p *process.Process) (read, write uint64, ok bo
 	return read, write, gotRead && gotWrite
 }
 
-// listProcesses skips gopsutil's NewProcess, which reads stat and /proc/stat
-// for every PID only to fill a creation time this package never uses.
+// listProcesses skips gopsutil's NewProcess, which reads stat for every PID to fill an unused creation time.
 func listProcesses() ([]*process.Process, error) {
 	pids, err := listProcPIDs("/proc")
 	if err != nil {
@@ -214,8 +212,7 @@ func listProcesses() ([]*process.Process, error) {
 	return procs, nil
 }
 
-// uidNames caches os/user lookups, which parse /etc/passwd on every call
-// without cgo. The cache is dropped when /etc/passwd changes.
+// uidNames caches os/user lookups, dropped when /etc/passwd changes.
 type uidNames struct {
 	mu       sync.Mutex
 	path     string

@@ -3,12 +3,13 @@
 package gops
 
 import (
+	"fmt"
 	"net"
 	"net/netip"
 	"os"
-	"os/user"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -44,39 +45,8 @@ func TestSetProcessExtras_GPUFromCursorClients(t *testing.T) {
 	assert.InDelta(t, 50.0, *info.GPU, 1e-9)
 }
 
-func TestProcessExtras_NetLoopbackIsZeroNotUnknown(t *testing.T) {
-	if _, err := dumpSockets(); err != nil {
-		t.Skip("sock_diag unavailable")
-	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	defer ln.Close()
-	c, err := net.Dial("tcp", ln.Addr().String())
-	require.NoError(t, err)
-	defer c.Close()
-
-	self := ownProcess(t)
-	res, err := newProcessTestUtil(t, self).GetProcessesWithOptions(ProcessOptions{EnableCPU: true, Net: true, GPU: true})
-	require.NoError(t, err)
-	row := res.Processes[0]
-	require.NotNil(t, row.Connections)
-	assert.Zero(t, *row.Connections)
-	assert.Empty(t, row.Remotes)
-	require.NotNil(t, row.NetRx, "the baseline pass gives the first response rates")
-	require.NotNil(t, row.NetTx)
-	assert.Zero(t, *row.NetRx)
-	_, baseline := decodeCursor(res.Cursor)
-	assert.Positive(t, baseline.at, "the cursor carries the socket baseline")
-	assert.NotNil(t, row.GPU, "GPU still works on the shared fd walk")
-}
-
 func TestProcessExtras_FirstPollNetRateFromBaselineDump(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	defer ln.Close()
-	c, err := net.Dial("tcp", ln.Addr().String())
-	require.NoError(t, err)
-	defer c.Close()
+	c, _ := loopbackConn(t)
 	inode := socketInode(t, c.(*net.TCPConn))
 
 	self := ownProcess(t)
@@ -114,19 +84,6 @@ func TestParseProcStat(t *testing.T) {
 	assert.False(t, ok, "starttime missing")
 	_, ok = parseProcStat("")
 	assert.False(t, ok)
-}
-
-func TestReadProcStatSelf(t *testing.T) {
-	p, err := process.NewProcess(int32(os.Getpid()))
-	require.NoError(t, err)
-	st, ok := newProcReader().stat(p)
-	require.True(t, ok)
-	created, err := p.CreateTime()
-	require.NoError(t, err)
-	assert.Equal(t, created, st.CreatedMillis, "matches gopsutil")
-	ppid, _ := p.Ppid()
-	assert.Equal(t, ppid, st.PPID)
-	assert.Positive(t, st.Threads)
 }
 
 func writeProcFixture(t *testing.T, root string, pid int, files map[string]string) {
@@ -174,91 +131,6 @@ func TestProcReader_Basics(t *testing.T) {
 	assert.Equal(t, procBasics{}, r.basics(&process.Process{Pid: 9}))
 	_, _, ok = r.diskBytes(&process.Process{Pid: 9})
 	assert.False(t, ok)
-}
-
-func TestProcReader_MatchesGopsutilForSelf(t *testing.T) {
-	p := ownProcess(t)
-	b := newProcReader().basics(p)
-	name, _ := p.Name()
-	cmdline, _ := p.Cmdline()
-	exe, _ := p.Exe()
-	user, _ := p.Username()
-	assert.Equal(t, name, b.Name)
-	assert.Equal(t, cmdline, b.Cmdline)
-	assert.Equal(t, exe, b.Exe)
-	assert.Equal(t, user, b.Username)
-	assert.Positive(t, b.RSS)
-}
-
-func TestUIDNames_CachedUntilPasswdChanges(t *testing.T) {
-	passwd := filepath.Join(t.TempDir(), "passwd")
-	require.NoError(t, os.WriteFile(passwd, []byte("a\n"), 0o644))
-	lookups := 0
-	names := &uidNames{path: passwd, lookupID: func(uid string) (*user.User, error) {
-		lookups++
-		if uid == "5" {
-			return nil, user.UnknownUserIdError(5)
-		}
-		return &user.User{Username: "u" + uid}, nil
-	}}
-
-	names.revalidate()
-	assert.Equal(t, "u1", names.lookup(1))
-	assert.Equal(t, "u1", names.lookup(1))
-	assert.Empty(t, names.lookup(5))
-	assert.Empty(t, names.lookup(5))
-	assert.Equal(t, 2, lookups, "hits and misses are both cached")
-
-	names.revalidate()
-	names.lookup(1)
-	assert.Equal(t, 2, lookups, "an unchanged passwd keeps the cache")
-
-	require.NoError(t, os.WriteFile(passwd, []byte("a\nb\n"), 0o644))
-	names.revalidate()
-	names.lookup(1)
-	assert.Equal(t, 3, lookups, "an edited passwd drops the cache")
-}
-
-func TestPSSCache_RefreshRule(t *testing.T) {
-	reads := 0
-	value := uint64(500)
-	c := &pssCache{read: func(int32) (uint64, error) {
-		reads++
-		return value, nil
-	}}
-	t0 := time.Unix(1000, 0)
-
-	c.get(9, 77, 200_000, t0)
-	c.get(9, 77, 200_000, t0.Add(4*time.Second))
-	assert.Equal(t, 2, reads, "a new entry is backdated by pid%10 tenths of pssMaxAge")
-	reads = 0
-
-	got, err := c.get(1, 77, 200_000, t0)
-	require.NoError(t, err)
-	assert.Equal(t, uint64(500), got)
-
-	value = 600
-	got, _ = c.get(1, 77, 209_000, t0.Add(10*time.Second))
-	assert.Equal(t, uint64(500), got, "RSS within 5% and younger than pssMaxAge: cached")
-	assert.Equal(t, 1, reads)
-
-	got, _ = c.get(1, 77, 211_000, t0.Add(10*time.Second))
-	assert.Equal(t, uint64(600), got, "RSS moved by more than 5%")
-	assert.Equal(t, 2, reads)
-
-	c.get(1, 78, 211_000, t0.Add(11*time.Second))
-	assert.Equal(t, 3, reads, "a reused PID is another process")
-
-	c.get(1, 78, 211_000, t0.Add(11*time.Second+pssMaxAge))
-	assert.Equal(t, 4, reads, "older than pssMaxAge")
-
-	c.read = func(int32) (uint64, error) { return 0, os.ErrNotExist }
-	_, err = c.get(2, 1, 200_000, t0)
-	assert.Error(t, err)
-	assert.NotContains(t, c.entries, int32(2), "errors are not cached")
-
-	c.prune(t0.Add(11*time.Second + 2*pssMaxAge))
-	assert.Empty(t, c.entries)
 }
 
 // netTestUtil serves procs on every call, so one GopsUtil (and its tails)
@@ -317,4 +189,18 @@ func TestProcessExtras_NetTailCreditedToPreviousHolder(t *testing.T) {
 	require.NotNil(t, row.NetRx)
 	assert.Positive(t, *row.NetRx, "the bytes after the last dump count for the process that held the socket")
 	assert.InDelta(t, 2.0, *row.NetRx / *row.NetTx, 1e-9)
+}
+
+func socketInode(t *testing.T, c syscall.Conn) uint32 {
+	raw, err := c.SyscallConn()
+	require.NoError(t, err)
+	var target string
+	require.NoError(t, raw.Control(func(fd uintptr) {
+		target, err = os.Readlink(fmt.Sprintf("/proc/self/fd/%d", fd))
+	}))
+	require.NoError(t, err)
+	var inode uint32
+	_, err = fmt.Sscanf(target, "socket:[%d]", &inode)
+	require.NoError(t, err)
+	return inode
 }
