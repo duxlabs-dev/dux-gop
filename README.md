@@ -90,8 +90,8 @@ dgop gpu
 # Get temperature for specific GPU
 dgop gpu-temp --pci-id 10de:2684
 
-# Temperature, fan and power sensors
-dgop sensors
+# Temperature, fan and power sensors; a GPU's only when named
+dgop sensors --gpu-pci-ids 10de:2684
 
 # Installed memory modules
 dgop memory-modules
@@ -148,14 +148,14 @@ dgop processes --limit 10
 # Skip CPU calculation for faster results
 dgop processes --no-cpu
 
-# Add per-process GPU and VRAM, disk I/O, or connections and TCP rates
-dgop processes --gpu --io --net
+# Add per-process GPU and VRAM (of the named GPUs), disk I/O, or connections and TCP rates
+dgop processes --gpu --gpu-pci-ids 10de:2684 --io --net
 
 # Combine options
 dgop meta --modules processes --sort memory --limit 20 --no-cpu
 
 # Per-process extras in meta
-dgop meta --modules processes,process-gpu,process-io,process-net --sort disk
+dgop meta --modules processes,process-gpu,process-io,process-net --gpu-pci-ids 10de:2684 --sort disk
 ```
 
 ## API Server
@@ -179,7 +179,7 @@ Then hit these endpoints:
 - **GET** `/gops/hardware` - Hardware info
 - **GET** `/gops/gpu` - GPU information
 - **GET** `/gops/gpu/temp?pciId=10de:2684` - GPU temperature
-- **GET** `/gops/sensors` - Temperature, fan and power sensors
+- **GET** `/gops/sensors?gpu_pci_ids=10de:2684` - Temperature, fan and power sensors
 - **GET** `/gops/memory/modules` - Installed memory modules
 - **GET** `/gops/net-rate?all_interfaces=true` - Network rates of every interface
 - **GET** `/gops/modules` - List available modules

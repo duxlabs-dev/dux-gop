@@ -306,7 +306,7 @@ type ProcessOptions struct {
 	Cursor        string
 	MergeChildren bool
 	GPU           bool
-	// GPUPciIds limits GPU reads to the named GPUs; nil means all.
+	// GPUPciIds names the GPUs to read; empty reads none.
 	GPUPciIds []string
 	IO        bool
 	Net       bool

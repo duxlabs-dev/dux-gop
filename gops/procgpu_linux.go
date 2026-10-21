@@ -14,9 +14,9 @@ type procGPUReader struct {
 	nvidiaVRAM map[int32]uint64
 }
 
-// newProcGPUReader prepares per-process reads against the GPUs enabled by
-// pciIds (nil enables all). It runs nvidia-smi once, and only if an enabled,
-// awake NVIDIA GPU exists.
+// newProcGPUReader prepares per-process reads against the GPUs named in
+// pciIds; none when it is empty. It runs nvidia-smi only for named, awake
+// NVIDIA GPUs.
 func (self *GopsUtil) newProcGPUReader(pciIds []string) *procGPUReader {
 	entries, _ := self.detectGPUEntries()
 	return buildProcGPUReader(pciDevicesRoot, gpusFromEntries(entries), pciIds, queryNvidiaPIDs)

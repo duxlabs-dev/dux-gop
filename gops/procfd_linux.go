@@ -37,7 +37,7 @@ func gpuNodes(pciRoot string, gpus []models.GPU, pciIds []string) gpuNodeSet {
 	for _, g := range gpus {
 		state := gpuNodeRead
 		switch {
-		case !gpuSelected(g, pciIds):
+		case !gpuRequested(g, pciIds):
 			state = gpuNodeExcluded
 		case isRuntimeSuspended(filepath.Join(pciRoot, g.BusId)):
 			state = gpuNodeSuspended

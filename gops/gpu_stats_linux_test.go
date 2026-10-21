@@ -222,6 +222,7 @@ func TestGPURequested(t *testing.T) {
 	assert.True(t, gpuRequested(gpu, []string{" 0000:01:00.0 "}))
 	assert.False(t, gpuRequested(gpu, []string{"0000:02:00.0", "1002:13c0"}))
 	assert.False(t, gpuRequested(models.GPU{PciId: "10de:2f04"}, []string{""}))
+	assert.False(t, gpuRequested(gpu, nil), "omitted selects none")
 }
 
 func TestSampleXeTemperatureFromPackageSensor(t *testing.T) {

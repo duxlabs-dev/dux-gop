@@ -8,9 +8,18 @@ import (
 	"github.com/duxlabs-dev/dux-gop/models"
 )
 
-// GetSensors returns every hwmon temperature, fan and power input.
-func (self *GopsUtil) GetSensors() (*models.SensorsInfo, error) {
-	return sensorsFromChips(self.readHwmonChips(hwmonRoot)), nil
+// GetSensors returns every hwmon temperature, fan and power input. A GPU's
+// chips are read only when gpuPciIds names it: amdgpu marks the card busy on
+// each read, which keeps an idle dGPU from suspending.
+func (self *GopsUtil) GetSensors(gpuPciIds []string) (*models.SensorsInfo, error) {
+	entries, _ := self.detectGPUEntries()
+	skip := map[string]bool{}
+	for _, gpu := range gpusFromEntries(entries) {
+		if gpu.BusId != "" && !gpuRequested(gpu, gpuPciIds) {
+			skip[gpu.BusId] = true
+		}
+	}
+	return sensorsFromChips(self.readHwmonChips(hwmonRoot, skip)), nil
 }
 
 func sensorsFromChips(chips []hwmonChip) *models.SensorsInfo {

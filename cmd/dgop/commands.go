@@ -922,7 +922,7 @@ func runTopCommand(gopsUtil *gops.GopsUtil) error {
 }
 
 func runSensorsCommand(gopsUtil *gops.GopsUtil) error {
-	info, err := gopsUtil.GetSensors()
+	info, err := gopsUtil.GetSensors(metaGPUPciIds)
 	if err != nil {
 		return fmt.Errorf("failed to get sensors: %w", err)
 	}

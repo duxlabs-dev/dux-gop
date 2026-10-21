@@ -1,7 +1,6 @@
 package gops_handler_test
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -118,34 +117,6 @@ func TestProcessesDefaultShape(t *testing.T) {
 				t.Fatalf("unexpected %s in default output", k)
 			}
 		}
-	}
-}
-
-func TestResolveGPUPciIds(t *testing.T) {
-	_, api := humatest.New(t)
-	var meta, proc []string
-	huma.Get(api, "/m", func(_ context.Context, in *gops_handler.MetaInput) (*struct{}, error) {
-		meta = in.GPUPciIds
-		return nil, nil
-	})
-	huma.Get(api, "/p", func(_ context.Context, in *gops_handler.ProcessInput) (*struct{}, error) {
-		proc = in.GPUPciIds
-		return nil, nil
-	})
-	api.Get("/m?modules=x&gpu_pci_ids=")
-	api.Get("/p?gpu_pci_ids=")
-	if meta == nil || proc == nil {
-		t.Errorf("empty must be non-nil: meta=%#v proc=%#v", meta, proc)
-	}
-	api.Get("/m?modules=x&gpu_pci_ids=a:b,c:d")
-	api.Get("/p?gpu_pci_ids=a:b&gpu_pci_ids=c:d")
-	if len(meta) != 2 || len(proc) != 2 {
-		t.Errorf("meta=%#v proc=%#v", meta, proc)
-	}
-	api.Get("/m?modules=x")
-	api.Get("/p")
-	if meta != nil || proc != nil {
-		t.Errorf("absent must be nil: meta=%#v proc=%#v", meta, proc)
 	}
 }
 

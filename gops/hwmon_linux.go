@@ -73,8 +73,9 @@ type hwmonInput struct {
 	powerCap, powerMax string
 }
 
-// readHwmonChips reads every usable chip under an hwmon class root.
-func (self *GopsUtil) readHwmonChips(root string) []hwmonChip {
+// readHwmonChips reads every usable chip under an hwmon class root, except
+// those of the devices in skip (by bus id).
+func (self *GopsUtil) readHwmonChips(root string, skip map[string]bool) []hwmonChip {
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		return nil
@@ -84,6 +85,9 @@ func (self *GopsUtil) readHwmonChips(root string) []hwmonChip {
 	for _, entry := range entries {
 		dir := filepath.Join(root, entry.Name())
 		seen[dir] = true
+		if link, err := os.Readlink(filepath.Join(dir, "device")); err == nil && skip[filepath.Base(link)] {
+			continue
+		}
 		if chip, ok := self.readHwmonChip(dir); ok {
 			chips = append(chips, chip)
 		}

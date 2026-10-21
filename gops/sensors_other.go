@@ -9,7 +9,7 @@ import (
 )
 
 // GetSensors maps the platform temperature sensors; fans and power are Linux-only.
-func (self *GopsUtil) GetSensors() (*models.SensorsInfo, error) {
+func (self *GopsUtil) GetSensors(_ []string) (*models.SensorsInfo, error) {
 	temps, err := self.hostProvider.SensorsTemperatures()
 	if err != nil {
 		return nil, err

@@ -54,7 +54,7 @@ func TestReadHwmonChips_AmdgpuLayout(t *testing.T) {
 	})
 	linkHwmonDevice(t, root, hw, "pci0000:00/0000:0c:00.0")
 
-	chips := NewGopsUtil().readHwmonChips(filepath.Join(root, "hwmon"))
+	chips := NewGopsUtil().readHwmonChips(filepath.Join(root, "hwmon"), nil)
 	require.Len(t, chips, 1)
 	chip := chips[0]
 	assert.Equal(t, "amdgpu", chip.Name)
@@ -92,7 +92,7 @@ func TestReadHwmonChips_PowerInputPreferredOverAverage(t *testing.T) {
 		"power1_input":   "5000000",
 		"power1_average": "9000000",
 	})
-	chips := NewGopsUtil().readHwmonChips(root)
+	chips := NewGopsUtil().readHwmonChips(root, nil)
 	require.Len(t, chips, 1)
 	require.Len(t, chips[0].Readings, 1)
 	assert.InDelta(t, 5, chips[0].Readings[0].Value, 1e-9)
@@ -107,7 +107,7 @@ func TestReadHwmonChips_UnlabeledAndNonNumeric(t *testing.T) {
 		"temp3_input": "40000",
 		"temp3_label": "Tccd1",
 	})
-	chips := NewGopsUtil().readHwmonChips(root)
+	chips := NewGopsUtil().readHwmonChips(root, nil)
 	require.Len(t, chips, 1)
 	assert.Empty(t, chips[0].Device)
 	require.Len(t, chips[0].Readings, 2)
@@ -115,7 +115,7 @@ func TestReadHwmonChips_UnlabeledAndNonNumeric(t *testing.T) {
 	assert.Equal(t, "Tccd1", chips[0].Readings[1].Label)
 }
 
-func TestReadHwmonChips_SkipsSuspendedAndDrivetemp(t *testing.T) {
+func TestReadHwmonChips_SkipsSuspendedDrivetempAndUnnamedGPU(t *testing.T) {
 	root := t.TempDir()
 	susp := filepath.Join(root, "hwmon0")
 	writeHwmonFiles(t, susp, map[string]string{"name": "amdgpu", "temp1_input": "1000"})
@@ -125,7 +125,11 @@ func TestReadHwmonChips_SkipsSuspendedAndDrivetemp(t *testing.T) {
 	writeHwmonFiles(t, filepath.Join(root, "hwmon1"), map[string]string{"name": "drivetemp", "temp1_input": "1000"})
 	writeHwmonFiles(t, filepath.Join(root, "hwmon2"), map[string]string{"name": "nvme", "temp1_input": "1000"})
 
-	chips := NewGopsUtil().readHwmonChips(root)
+	awake := filepath.Join(root, "hwmon3")
+	writeHwmonFiles(t, awake, map[string]string{"name": "amdgpu", "temp1_input": "1000"})
+	linkHwmonDevice(t, root, awake, "pci/0000:0c:00.0")
+
+	chips := NewGopsUtil().readHwmonChips(root, map[string]bool{"0000:0c:00.0": true})
 	require.Len(t, chips, 1)
 	assert.Equal(t, "nvme", chips[0].Name)
 }
@@ -172,7 +176,7 @@ func TestGetSensors_Live(t *testing.T) {
 	if len(entries) == 0 {
 		t.Skip("no hwmon chips")
 	}
-	info, err := NewGopsUtil().GetSensors()
+	info, err := NewGopsUtil().GetSensors(nil)
 	require.NoError(t, err)
 	require.NotNil(t, info)
 	for _, s := range info.Sensors {
@@ -193,7 +197,7 @@ func TestReadHwmonChips_LimitsAndFreq(t *testing.T) {
 		"power1_input": "1000000", "power1_cap": "0", "power1_max": "50000000",
 		"freq1_input": "2500000000", "freq1_label": "sclk",
 	})
-	chips := NewGopsUtil().readHwmonChips(root)
+	chips := NewGopsUtil().readHwmonChips(root, nil)
 	require.Len(t, chips, 1)
 	by := map[string]hwmonReading{}
 	for _, r := range chips[0].Readings {
@@ -233,7 +237,7 @@ func TestReadHwmonChips_EvictsStaleI2CCache(t *testing.T) {
 	hwmonCache[filepath.Join(root, "gone")] = &hwmonState{}
 	hwmonMu.Unlock()
 	writeHwmonFiles(t, filepath.Join(root, "hwmon0"), map[string]string{"name": "x"})
-	NewGopsUtil().readHwmonChips(root)
+	NewGopsUtil().readHwmonChips(root, nil)
 	hwmonMu.Lock()
 	defer hwmonMu.Unlock()
 	assert.NotContains(t, hwmonCache, filepath.Join(root, "gone"))

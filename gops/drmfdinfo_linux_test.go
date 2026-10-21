@@ -308,5 +308,5 @@ func TestGPUNodes(t *testing.T) {
 
 	assert.Empty(t, gpuNodes(pciRoot, gpus, []string{"1002:744c"}).nvidia, "an excluded NVIDIA GPU is not monitored")
 	writeHwmonFiles(t, pciRoot, map[string]string{"0000:01:00.0/power/runtime_status": "suspended\n"})
-	assert.Empty(t, gpuNodes(pciRoot, gpus, nil).nvidia, "a suspended NVIDIA GPU is not monitored")
+	assert.Empty(t, gpuNodes(pciRoot, gpus, []string{"10de:2786"}).nvidia, "a suspended NVIDIA GPU is not monitored")
 }

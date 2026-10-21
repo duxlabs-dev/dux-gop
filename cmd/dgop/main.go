@@ -87,7 +87,7 @@ func init() {
 	processesCmd.Flags().StringVar(&procCursor, "cursor", "", "Cursor from previous process request")
 	processesCmd.Flags().BoolVar(&mergeChildren, "merge-children", true, "Merge child processes with same executable")
 
-	processesCmd.Flags().StringSliceVar(&metaGPUPciIds, "gpu-pci-ids", nil, "With --gpu, only read these GPUs (e.g., 10de:2684); empty reads none, omitted reads all")
+	processesCmd.Flags().StringSliceVar(&metaGPUPciIds, "gpu-pci-ids", nil, "With --gpu, the GPUs to read (e.g., 10de:2684); other GPUs are not touched")
 	processesCmd.Flags().BoolVar(&procGPU, "gpu", false, "Include per-process GPU usage and VRAM")
 	processesCmd.Flags().BoolVar(&procIO, "io", false, "Include per-process disk read/write rates")
 	processesCmd.Flags().BoolVar(&procNet, "net", false, "Include per-process connections and TCP rates")
@@ -95,7 +95,8 @@ func init() {
 	metaCmd.Flags().StringSliceVar(&metaModules, "modules", []string{"all"}, "Modules to include (cpu,memory,network,etc)")
 	metaCmd.Flags().StringVar(&procSortBy, "sort", "cpu", "Sort processes by (cpu, memory, name, pid, gpu, vram, disk, network)")
 	metaCmd.Flags().IntVar(&procLimit, "limit", 0, "Limit number of processes (0 = no limit)")
-	metaCmd.Flags().StringSliceVar(&metaGPUPciIds, "gpu-pci-ids", nil, "PCI IDs or bus addresses of GPUs to read for gpu, gpu-temp and process-gpu (e.g., 10de:2684,0000:03:00.0); empty reads none. Omitted, process-gpu reads all and gpu and gpu-temp read none")
+	metaCmd.Flags().StringSliceVar(&metaGPUPciIds, "gpu-pci-ids", nil, "PCI IDs or bus addresses of GPUs to read for gpu, gpu-temp, process-gpu and sensors (e.g., 10de:2684,0000:03:00.0); other GPUs are not touched")
+	sensorsCmd.Flags().StringSliceVar(&metaGPUPciIds, "gpu-pci-ids", nil, "GPUs whose sensors to read (e.g., 1002:744c); other GPUs are not touched")
 	metaCmd.Flags().StringVar(&gpuCursor, "gpu-cursor", "", "GPU cursor from previous request")
 	metaCmd.Flags().StringVar(&cpuCursor, "cpu-cursor", "", "CPU cursor from previous request")
 	metaCmd.Flags().StringVar(&procCursor, "proc-cursor", "", "Process cursor from previous request")

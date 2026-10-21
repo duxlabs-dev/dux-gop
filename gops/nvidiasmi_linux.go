@@ -12,6 +12,8 @@ import (
 // queryNvidiaPIDs returns VRAM bytes per PID on the GPUs at busIds from
 // `nvidia-smi -q -d PIDS`, which unlike --query-compute-apps also lists
 // graphics processes. It returns nil when nvidia-smi is missing or fails.
+// It runs one nvidia-smi per GPU in series, so a request can wait up to
+// nvidiaSmiTimeout (2 s) per named NVIDIA GPU.
 func queryNvidiaPIDs(busIds []string) map[int32]uint64 {
 	path, err := exec.LookPath("nvidia-smi")
 	if err != nil {

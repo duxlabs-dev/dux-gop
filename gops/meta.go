@@ -42,9 +42,9 @@ type MetaParams struct {
 	ProcLimit     int
 	EnableCPU     bool
 	MergeChildren bool
-	// GPUPciIds selects GPUs by PCI ID or bus address. gpu and gpu-temp read
-	// only listed GPUs, so omitting the list never starts nvidia-smi, which
-	// wakes a suspended dGPU. process-gpu reads all GPUs when it is nil.
+	// GPUPciIds names GPUs by PCI ID or bus address; gpu, gpu-temp,
+	// process-gpu and sensors touch no other GPU, since any driver query can
+	// wake a suspended dGPU or keep an idle one awake.
 	GPUPciIds      []string
 	GPUCursor      string
 	CPUCursor      string
@@ -125,7 +125,7 @@ func (self *GopsUtil) GetMeta(ctx context.Context, modules []string, params Meta
 				meta.GPU = gpu
 			}
 		case "sensors":
-			if sn, err := self.GetSensors(); err == nil {
+			if sn, err := self.GetSensors(params.GPUPciIds); err == nil {
 				meta.Sensors = sn
 			}
 		case "memory-modules":
@@ -347,7 +347,7 @@ func (self *GopsUtil) loadAllModules(ctx context.Context, params MetaParams, pro
 			return ctx.Err()
 		default:
 		}
-		v, err := self.GetSensors()
+		v, err := self.GetSensors(params.GPUPciIds)
 		if err != nil {
 			log.Warn("failed to get sensors", "error", err)
 			return nil

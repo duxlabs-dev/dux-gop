@@ -18,12 +18,7 @@ type ProcessInput struct {
 	GPU            bool            `query:"gpu" default:"false"`
 	IO             bool            `query:"io" default:"false"`
 	Net            bool            `query:"net" default:"false"`
-	GPUPciIds      []string        `query:"gpu_pci_ids" example:"10de:2684" doc:"With gpu, only read these GPUs. Omit for all"`
-}
-
-func (in *ProcessInput) Resolve(ctx huma.Context) []error {
-	in.GPUPciIds = pciIdsFromQuery(ctx)
-	return nil
+	GPUPciIds      []string        `query:"gpu_pci_ids" example:"10de:2684" doc:"With gpu, the GPUs to read; other GPUs are not touched"`
 }
 
 type ProcessResponse struct {

@@ -242,11 +242,3 @@ func TestGetGPUInfoWithStats_IdenticalGPUsToldApartByBusId(t *testing.T) {
 	assert.Equal(t, []string{"0000:0c:00.0", "0000:0d:00.0"}, sampled, "a PCI ID selects every card of that model")
 	assert.Equal(t, []float64{1, 2}, []float64{info.GPUs[0].Temperature, info.GPUs[1].Temperature})
 }
-
-func TestGPUSelected(t *testing.T) {
-	gpu := models.GPU{PciId: "1002:744c", BusId: "0000:0c:00.0"}
-	assert.True(t, gpuSelected(gpu, nil), "nil selects all")
-	assert.False(t, gpuSelected(gpu, []string{}), "empty selects none")
-	assert.True(t, gpuSelected(gpu, []string{"00000000:0C:00.0"}))
-	assert.False(t, gpuSelected(gpu, []string{"10de:2684"}))
-}

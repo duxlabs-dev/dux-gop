@@ -119,12 +119,6 @@ func gpuRequested(gpu models.GPU, ids []string) bool {
 	return false
 }
 
-// gpuSelected is gpuRequested for readers that take every GPU when ids is nil
-// (process-gpu); an empty, non-nil list still selects none.
-func gpuSelected(gpu models.GPU, ids []string) bool {
-	return ids == nil || gpuRequested(gpu, ids)
-}
-
 // normalizeBusId turns nvidia-smi's 8 digit PCI domain ("00000000:01:00.0")
 // into the sysfs form ("0000:01:00.0").
 func normalizeBusId(id string) string {
