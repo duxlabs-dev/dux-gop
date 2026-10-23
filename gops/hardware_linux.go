@@ -87,7 +87,7 @@ func detectGPUEntries() ([]gpuEntry, error) {
 }
 
 func scanGPUEntries() ([]gpuEntry, error) {
-	devices, err := filepath.Glob("/sys/bus/pci/devices/*")
+	devices, err := filepath.Glob(filepath.Join(pciDevicesRoot, "*"))
 	if err != nil {
 		return nil, err
 	}
@@ -192,7 +192,7 @@ func lookupPCIDevice(vendorId, deviceId string) string {
 }
 
 func getGPUDriver(bdf string) string {
-	driverPath := filepath.Join("/sys/bus/pci/devices", bdf, "driver")
+	driverPath := filepath.Join(pciDevicesRoot, bdf, "driver")
 	if link, err := os.Readlink(driverPath); err == nil {
 		return filepath.Base(link)
 	}

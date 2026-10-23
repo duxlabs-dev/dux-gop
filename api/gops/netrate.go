@@ -9,7 +9,8 @@ import (
 )
 
 type NetRateInput struct {
-	Cursor string `query:"cursor" doc:"Base64 cursor for rate calculation"`
+	Cursor        string `query:"cursor" doc:"Base64 cursor for rate calculation"`
+	AllInterfaces bool   `query:"all_interfaces" default:"false" doc:"Include all interfaces, not only the default set"`
 }
 
 type NetRateResponse struct {
@@ -18,7 +19,7 @@ type NetRateResponse struct {
 
 // GET /net-rate
 func (self *HandlerGroup) NetRate(ctx context.Context, input *NetRateInput) (*NetRateResponse, error) {
-	netRateInfo, err := self.srv.Gops.GetNetworkRates(input.Cursor)
+	netRateInfo, err := self.srv.Gops.GetNetworkRatesWithOptions(input.Cursor, input.AllInterfaces)
 	if err != nil {
 		log.Error("Error getting network rates")
 		return nil, huma.Error500InternalServerError("Unable to retrieve network rates")

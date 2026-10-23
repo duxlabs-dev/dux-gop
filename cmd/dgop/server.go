@@ -34,9 +34,11 @@ func runServerCommand(cmd *cobra.Command, args []string) error {
 }
 
 func startAPI(ctx context.Context, cfg *config.Config) error {
+	gopsUtil := gops.NewGopsUtil()
+	defer gopsUtil.Close()
 	srvImpl := &server.Server{
 		Cfg:  cfg,
-		Gops: gops.NewGopsUtil(),
+		Gops: gopsUtil,
 	}
 
 	r := chi.NewRouter()

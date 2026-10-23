@@ -131,3 +131,9 @@ func BenchmarkCalculateCPUPercentage(b *testing.B) {
 		calculateCPUPercentage(prev, curr)
 	}
 }
+
+func TestCPUVirtualization(t *testing.T) {
+	assert.Equal(t, "AMD-V", cpuVirtualization([]string{"fpu", "svm", "sse"}))
+	assert.Equal(t, "VT-x", cpuVirtualization([]string{"vmx"}))
+	assert.Equal(t, "", cpuVirtualization(nil))
+}

@@ -2,8 +2,11 @@ package gops
 
 import (
 	"testing"
+	"time"
 
+	"github.com/duxlabs-dev/dux-gop/models"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestInferVendorFromId(t *testing.T) {
@@ -170,4 +173,45 @@ func BenchmarkInferVendor(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		inferVendor("nvidia", "NVIDIA GeForce RTX 3080")
 	}
+}
+
+func TestGetGPUInfoWithStats_IdenticalGPUsToldApartByBusId(t *testing.T) {
+	var sampled []string
+	g := &GopsUtil{
+		detectGPUEntries: func() ([]gpuEntry, error) {
+			return []gpuEntry{
+				{Driver: "amdgpu", BusId: "0000:0c:00.0", RawLine: "0000:0c:00.0 Display controller: Navi 31 [1002:744c]"},
+				{Driver: "amdgpu", BusId: "0000:0d:00.0", RawLine: "0000:0d:00.0 Display controller: Navi 31 [1002:744c]"},
+			}, nil
+		},
+		sampleGPUs: func(entries []gpuEntry, _ gpuCursor, now time.Time) ([]gpuSample, gpuCursor) {
+			samples := make([]gpuSample, len(entries))
+			for i, e := range entries {
+				sampled = append(sampled, e.BusId)
+				samples[i] = gpuSample{State: models.GPUStateActive, Temperature: float64(len(sampled))}
+			}
+			return samples, newGPUCursor(now)
+		},
+	}
+
+	for name, ids := range map[string][]string{"nil": nil, "empty": {}} {
+		sampled = nil
+		info, err := g.GetGPUInfoWithStats(ids, "")
+		require.NoError(t, err, name)
+		assert.Empty(t, sampled, name)
+		assert.Len(t, info.GPUs, 2, name)
+	}
+
+	sampled = nil
+	info, err := g.GetGPUInfoWithStats([]string{"0000:0d:00.0"}, "")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"0000:0d:00.0"}, sampled)
+	assert.Empty(t, info.GPUs[0].State)
+	assert.Equal(t, models.GPUStateActive, info.GPUs[1].State)
+	assert.Equal(t, 1.0, info.GPUs[1].Temperature)
+
+	sampled = nil
+	info, _ = g.GetGPUInfoWithStats([]string{"1002:744c"}, "")
+	assert.Equal(t, []string{"0000:0c:00.0", "0000:0d:00.0"}, sampled, "a PCI ID selects every card of that model")
+	assert.Equal(t, []float64{1, 2}, []float64{info.GPUs[0].Temperature, info.GPUs[1].Temperature})
 }

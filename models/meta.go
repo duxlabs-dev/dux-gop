@@ -14,6 +14,7 @@ type SystemInfo struct {
 	LoadAvg   string `json:"loadavg"`
 	Processes int    `json:"processes"`
 	Threads   int    `json:"threads"`
+	OpenFiles int    `json:"openFiles,omitempty" doc:"System-wide open file handles"`
 	BootTime  string `json:"boottime"`
 }
 
@@ -29,7 +30,10 @@ type MetaInfo struct {
 	System     *SystemInfo          `json:"system,omitempty"`
 	Hardware   *SystemHardware      `json:"hardware,omitempty"`
 	GPU        *GPUInfo             `json:"gpu,omitempty"`
-	Cursor     string               `json:"cursor,omitempty"`
+
+	Sensors       *SensorsInfo       `json:"sensors,omitempty"`
+	MemoryModules *MemoryModulesInfo `json:"memorymodules,omitempty"`
+	Cursor        string             `json:"cursor,omitempty"`
 }
 
 type ModulesInfo struct {

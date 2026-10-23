@@ -15,6 +15,10 @@ type ProcessInput struct {
 	DisableProcCPU bool            `query:"disable_proc_cpu" default:"false"`
 	Cursor         string          `query:"cursor" required:"false"`
 	MergeChildren  bool            `query:"merge_children" default:"true"`
+	GPU            bool            `query:"gpu" default:"false"`
+	IO             bool            `query:"io" default:"false"`
+	Net            bool            `query:"net" default:"false"`
+	GPUPciIds      []string        `query:"gpu_pci_ids" example:"10de:2684" doc:"With gpu, the GPUs to read; other GPUs are not touched"`
 }
 
 type ProcessResponse struct {
@@ -28,7 +32,10 @@ type ProcessResponse struct {
 func (self *HandlerGroup) Processes(ctx context.Context, input *ProcessInput) (*ProcessResponse, error) {
 	enableCPU := !input.DisableProcCPU
 
-	result, err := self.srv.Gops.GetProcessesWithCursor(input.SortBy, input.Limit, enableCPU, input.Cursor, input.MergeChildren)
+	result, err := self.srv.Gops.GetProcessesWithOptions(gops.ProcessOptions{
+		SortBy: input.SortBy, Limit: input.Limit, EnableCPU: enableCPU, Cursor: input.Cursor,
+		MergeChildren: input.MergeChildren, GPU: input.GPU, GPUPciIds: input.GPUPciIds, IO: input.IO, Net: input.Net,
+	})
 	if err != nil {
 		log.Error("Error getting process info")
 		return nil, huma.Error500InternalServerError("Unable to retrieve process info")

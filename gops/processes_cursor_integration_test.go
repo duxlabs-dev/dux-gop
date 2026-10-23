@@ -23,7 +23,7 @@ func newProcessTestUtil(t *testing.T, procs ...*process.Process) *GopsUtil {
 	mockMem := mocks.NewMockMemoryInfoProvider(t)
 	mockMem.EXPECT().VirtualMemory().Return(&mem.VirtualMemoryStat{Total: 16 << 30}, nil).Once()
 
-	return NewGopsUtilWithProviders(
+	g := NewGopsUtilWithProviders(
 		mocks.NewMockCPUInfoProvider(t),
 		mockMem,
 		mocks.NewMockDiskInfoProvider(t),
@@ -33,6 +33,8 @@ func newProcessTestUtil(t *testing.T, procs ...*process.Process) *GopsUtil {
 		mocks.NewMockLoadInfoProvider(t),
 		mocks.NewMockFileSystem(t),
 	)
+	t.Cleanup(g.Close)
+	return g
 }
 
 func TestGetProcessesWithCursor_UsesCursorForCPU(t *testing.T) {
@@ -42,11 +44,11 @@ func TestGetProcessesWithCursor_UsesCursorForCPU(t *testing.T) {
 	times, err := self.Times()
 	require.NoError(t, err)
 
-	cursor := encodeProcessCursor([]models.ProcessCursorData{{
+	cursor := encodeProcessCursor([]processSample{{ProcessCursorData: models.ProcessCursorData{
 		PID:       self.Pid,
 		Ticks:     times.User + times.System - 5.0,
 		Timestamp: time.Now().UnixMilli() - 10_000,
-	}})
+	}}})
 
 	util := newProcessTestUtil(t, self)
 
@@ -69,11 +71,11 @@ func TestGetProcessesWithCursor_ClampsToWholeMachine(t *testing.T) {
 
 	// An implausible amount of CPU over a very short interval, as a stale or
 	// hand-crafted cursor would produce.
-	cursor := encodeProcessCursor([]models.ProcessCursorData{{
+	cursor := encodeProcessCursor([]processSample{{ProcessCursorData: models.ProcessCursorData{
 		PID:       self.Pid,
 		Ticks:     times.User + times.System - 1000.0,
 		Timestamp: time.Now().UnixMilli() - 10,
-	}})
+	}}})
 
 	util := newProcessTestUtil(t, self)
 

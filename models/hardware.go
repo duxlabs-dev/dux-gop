@@ -14,6 +14,7 @@ type SystemHardware struct {
 	Arch     string   `json:"arch"`
 	CPU      CPUBasic `json:"cpu"`
 	BIOS     BIOSInfo `json:"bios"`
+	Init     string   `json:"initSystem,omitempty" doc:"Name of PID 1, e.g. systemd"`
 }
 
 type CPUBasic struct {
@@ -41,6 +42,24 @@ type GPU struct {
 	Power       *float64 `json:"power,omitempty"`
 	CoreClock   *float64 `json:"coreClock,omitempty"`
 	MemoryClock *float64 `json:"memoryClock,omitempty"`
+
+	GTTUsed           *uint64  `json:"gttUsed,omitempty" doc:"System memory mapped for the GPU, KB"`
+	GTTTotal          *uint64  `json:"gttTotal,omitempty" doc:"KB"`
+	MemoryBusy        *float64 `json:"memoryBusy,omitempty" doc:"Memory controller busy percentage"`
+	EncoderUsage      *float64 `json:"encoderUsage,omitempty" doc:"Video encoder busy percentage"`
+	DecoderUsage      *float64 `json:"decoderUsage,omitempty" doc:"Video decoder busy percentage"`
+	CoreClockMax      *float64 `json:"coreClockMax,omitempty" doc:"MHz"`
+	MemoryClockMax    *float64 `json:"memoryClockMax,omitempty" doc:"MHz"`
+	Hotspot           *float64 `json:"hotspot,omitempty" doc:"Celsius"`
+	MemoryTemperature *float64 `json:"memoryTemperature,omitempty" doc:"Celsius"`
+	PowerLimit        *float64 `json:"powerLimit,omitempty" doc:"Watts"`
+	FanRpm            *int     `json:"fanRpm,omitempty"`
+	FanMaxRpm         *int     `json:"fanMaxRpm,omitempty"`
+	FanPercent        *float64 `json:"fanPercent,omitempty"`
+	PcieLinkSpeed     string   `json:"pcieLinkSpeed,omitempty" doc:"Kernel string, e.g. 16.0 GT/s PCIe"`
+	PcieLinkSpeedMax  string   `json:"pcieLinkSpeedMax,omitempty"`
+	PcieLinkWidth     int      `json:"pcieLinkWidth,omitempty"`
+	PcieLinkWidthMax  int      `json:"pcieLinkWidthMax,omitempty"`
 }
 
 const (

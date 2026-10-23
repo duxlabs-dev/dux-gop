@@ -147,7 +147,7 @@ func (d *DefaultNetworkInfoProvider) Interfaces() ([]net.InterfaceStat, error) {
 type DefaultProcessInfoProvider struct{}
 
 func (d *DefaultProcessInfoProvider) Processes() ([]*process.Process, error) {
-	return process.Processes()
+	return listProcesses()
 }
 
 func (d *DefaultProcessInfoProvider) NewProcess(pid int32) (*process.Process, error) {

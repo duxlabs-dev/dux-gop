@@ -191,3 +191,10 @@ func BenchmarkParseNetworkRateCursor(b *testing.B) {
 		parseNetworkRateCursor(encoded)
 	}
 }
+
+func TestIncludeNetworkInterface(t *testing.T) {
+	assert.False(t, includeNetworkInterface("tailscale0", false))
+	assert.True(t, includeNetworkInterface("tailscale0", true))
+	assert.True(t, includeNetworkInterface("lo", true))
+	assert.Equal(t, matchesNetworkInterface("eth0"), includeNetworkInterface("eth0", false))
+}

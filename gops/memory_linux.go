@@ -5,6 +5,7 @@ package gops
 import (
 	"bufio"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -57,6 +58,8 @@ func (self *GopsUtil) GetMemoryInfo() (*models.MemoryInfo, error) {
 		usedPercent = float64(used) / float64(total) * 100
 	}
 
+	zramOrig, zramCompr := readZramStats("/sys/block")
+
 	return &models.MemoryInfo{
 		Total:        total,
 		Used:         used,
@@ -72,7 +75,66 @@ func (self *GopsUtil) GetMemoryInfo() (*models.MemoryInfo, error) {
 		GPUReclaim:   gpuReclaim,
 		SwapTotal:    v.SwapTotal / 1024,
 		SwapFree:     v.SwapFree / 1024,
+		ZramOrig:     zramOrig,
+		ZramCompr:    zramCompr,
+		Committed:    v.CommittedAS / 1024,
+		CommitLimit:  v.CommitLimit / 1024,
+		SwapDevices:  readSwapDevices(),
 	}, nil
+}
+
+func readSwapDevices() []models.SwapDevice {
+	data, err := os.ReadFile("/proc/swaps")
+	if err != nil {
+		return nil
+	}
+	return parseProcSwaps(string(data))
+}
+
+// parseProcSwaps parses /proc/swaps; sizes there are already in KB.
+func parseProcSwaps(text string) []models.SwapDevice {
+	var devices []models.SwapDevice
+	for _, line := range strings.Split(text, "\n")[1:] {
+		fields := strings.Fields(line)
+		if len(fields) < 4 {
+			continue
+		}
+		size, err1 := strconv.ParseUint(fields[2], 10, 64)
+		used, err2 := strconv.ParseUint(fields[3], 10, 64)
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		kind := fields[1]
+		if strings.HasPrefix(fields[0], "/dev/zram") {
+			kind = "zram"
+		}
+		devices = append(devices, models.SwapDevice{Name: fields[0], Kind: kind, Size: size, Used: used})
+	}
+	return devices
+}
+
+// readZramStats sums orig_data_size and compr_data_size (fields 1 and 2 of
+// mm_stat, bytes) over all zram devices under blockDir, returning KB.
+func readZramStats(blockDir string) (orig, compr uint64) {
+	paths, _ := filepath.Glob(filepath.Join(blockDir, "zram*", "mm_stat"))
+	for _, p := range paths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		fields := strings.Fields(string(data))
+		if len(fields) < 2 {
+			continue
+		}
+		o, err1 := strconv.ParseUint(fields[0], 10, 64)
+		c, err2 := strconv.ParseUint(fields[1], 10, 64)
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		orig += o / 1024
+		compr += c / 1024
+	}
+	return orig, compr
 }
 
 func readGPUMemStats() (active uint64, reclaim uint64) {

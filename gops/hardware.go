@@ -14,18 +14,10 @@ import (
 func (self *GopsUtil) GetSystemHardware() (*models.SystemHardware, error) {
 	info := &models.SystemHardware{}
 
-	cpuInfo, err := self.GetCPUInfo()
-	if err == nil {
-		info.CPU = models.CPUBasic{
-			Count: cpuInfo.Count,
-			Model: cpuInfo.Model,
-		}
-	} else {
-		info.CPU = models.CPUBasic{
-			Count: 0,
-			Model: "Unknown",
-		}
-	}
+	cpuTracker.mu.Lock()
+	self.loadCPUStatic()
+	info.CPU = models.CPUBasic{Count: cpuTracker.cpuCount, Model: cpuTracker.cpuModel}
+	cpuTracker.mu.Unlock()
 
 	biosInfo := getBIOSInfo()
 	info.BIOS = biosInfo
@@ -39,17 +31,20 @@ func (self *GopsUtil) GetSystemHardware() (*models.SystemHardware, error) {
 	info.Hostname = hostInfo.Hostname
 	info.Arch = hostInfo.KernelArch
 	info.Distro = getDistroName()
+	if comm, err := readFile("/proc/1/comm"); err == nil {
+		info.Init = strings.TrimSpace(comm)
+	}
 
 	return info, nil
 }
 
 func (self *GopsUtil) GetGPUInfo() (*models.GPUInfo, error) {
-	gpus, err := detectGPUs()
+	entries, err := self.detectGPUEntries()
 	if err != nil {
 		return nil, err
 	}
 
-	return &models.GPUInfo{GPUs: gpus}, nil
+	return &models.GPUInfo{GPUs: gpusFromEntries(entries)}, nil
 }
 
 func (self *GopsUtil) GetGPUInfoWithTemp(ids []string) (*models.GPUInfo, error) {
@@ -60,7 +55,7 @@ func (self *GopsUtil) GetGPUInfoWithTemp(ids []string) (*models.GPUInfo, error) 
 // ID or bus address), so cards nobody asked about are never woken. The cursor
 // from the previous call enables metrics derived from counter deltas.
 func (self *GopsUtil) GetGPUInfoWithStats(ids []string, cursor string) (*models.GPUInfo, error) {
-	entries, err := detectGPUEntries()
+	entries, err := self.detectGPUEntries()
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +78,7 @@ func (self *GopsUtil) GetGPUInfoWithStats(ids []string, cursor string) (*models.
 		return info, nil
 	}
 
-	samples, next := sampleGPUs(targets, decodeGPUCursor(cursor), time.Now())
+	samples, next := self.sampleGPUs(targets, decodeGPUCursor(cursor), time.Now())
 	for i, sample := range samples {
 		sample.applyTo(&gpus[indexes[i]])
 	}
@@ -96,7 +91,7 @@ func (self *GopsUtil) GetGPUTemp(pciId string) (*models.GPUTempInfo, error) {
 		return nil, fmt.Errorf("pciId is required")
 	}
 
-	entries, err := detectGPUEntries()
+	entries, err := self.detectGPUEntries()
 	if err != nil {
 		return nil, err
 	}
@@ -105,14 +100,13 @@ func (self *GopsUtil) GetGPUTemp(pciId string) (*models.GPUTempInfo, error) {
 		if !gpuRequested(gpu, []string{pciId}) {
 			continue
 		}
-		samples, _ := sampleGPUs(entries[i:i+1], gpuCursor{}, time.Now())
+		samples, _ := self.sampleGPUs(entries[i:i+1], gpuCursor{}, time.Now())
 		return &models.GPUTempInfo{
 			Driver:      entries[i].Driver,
 			Hwmon:       samples[0].Hwmon,
 			Temperature: samples[0].Temperature,
 		}, nil
 	}
-
 	return nil, fmt.Errorf("GPU with PCI ID %s not found", pciId)
 }
 
@@ -135,14 +129,6 @@ func inferVendorFromId(vendorId, driver string) string {
 	default:
 		return inferVendor(driver, "")
 	}
-}
-
-func detectGPUs() ([]models.GPU, error) {
-	gpuEntries, err := detectGPUEntries()
-	if err != nil {
-		return nil, err
-	}
-	return gpusFromEntries(gpuEntries), nil
 }
 
 func gpusFromEntries(entries []gpuEntry) []models.GPU {
@@ -208,29 +194,32 @@ func getPriority(driver, bdf string) int {
 	}
 }
 
+var (
+	gpuPciIDRe        = regexp.MustCompile(`\[([0-9a-f]{4}:[0-9a-f]{4})\]`)
+	gpuClassPrefixRe  = regexp.MustCompile(`^[^:]+: `)
+	gpuPciIDTailRe    = regexp.MustCompile(`\[[0-9a-f]{4}:[0-9a-f]{4}\].*$`)
+	gpuAfterBracketRe = regexp.MustCompile(`\]\s*([^\[]+)$`)
+	gpuLastBracketRe  = regexp.MustCompile(`\[([^\]]+)\]([^\[]*$)`)
+)
+
 func parseGPUInfo(rawLine string) (displayName, pciId string) {
 	if rawLine == "" {
 		return "Unknown", ""
 	}
 
-	pciRegex := regexp.MustCompile(`\[([0-9a-f]{4}:[0-9a-f]{4})\]`)
-	if match := pciRegex.FindStringSubmatch(rawLine); len(match) > 1 {
+	if match := gpuPciIDRe.FindStringSubmatch(rawLine); len(match) > 1 {
 		pciId = match[1]
 	}
 
-	s := regexp.MustCompile(`^[^:]+: `).ReplaceAllString(rawLine, "")
-	s = regexp.MustCompile(`\[[0-9a-f]{4}:[0-9a-f]{4}\].*$`).ReplaceAllString(s, "")
+	s := gpuClassPrefixRe.ReplaceAllString(rawLine, "")
+	s = gpuPciIDTailRe.ReplaceAllString(s, "")
 
-	afterBracketRegex := regexp.MustCompile(`\]\s*([^\[]+)$`)
-	if match := afterBracketRegex.FindStringSubmatch(s); len(match) > 1 && strings.TrimSpace(match[1]) != "" {
+	if match := gpuAfterBracketRe.FindStringSubmatch(s); len(match) > 1 && strings.TrimSpace(match[1]) != "" {
 		displayName = strings.TrimSpace(match[1])
+	} else if match := gpuLastBracketRe.FindStringSubmatch(s); len(match) > 1 {
+		displayName = match[1]
 	} else {
-		lastBracketRegex := regexp.MustCompile(`\[([^\]]+)\]([^\[]*$)`)
-		if match := lastBracketRegex.FindStringSubmatch(s); len(match) > 1 {
-			displayName = match[1]
-		} else {
-			displayName = s
-		}
+		displayName = s
 	}
 
 	displayName = removeVendorPrefixes(displayName)

@@ -58,8 +58,8 @@ func readXeVRAM(dev string, sample *gpuSample) {
 	}
 
 	if used, total, ok := parseXeMemRegions(buf); ok {
-		sample.MemoryUsed = uint64Ptr(used / 1024)
-		sample.MemoryTotal = uint64Ptr(total / 1024)
+		sample.MemoryUsed = new(used / 1024)
+		sample.MemoryTotal = new(total / 1024)
 	}
 }
 

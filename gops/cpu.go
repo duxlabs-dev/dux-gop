@@ -3,6 +3,7 @@ package gops
 import (
 	"encoding/base64"
 	"encoding/json"
+	"slices"
 	"sync"
 	"time"
 
@@ -15,12 +16,17 @@ type CPUTracker struct {
 	cpuCount    int
 	modelCached bool
 
+	virtualization string
+
 	tempPath     string
 	tempLastRead time.Time
 	tempValue    float64
 
 	freqLastRead time.Time
 	freqValue    float64
+
+	static  cpuStatic
+	dynamic cpuDynamic
 
 	mu sync.RWMutex
 }
@@ -37,19 +43,18 @@ func (self *GopsUtil) GetCPUInfoWithCursor(cursor string) (*models.CPUInfo, erro
 	cpuTracker.mu.Lock()
 	defer cpuTracker.mu.Unlock()
 
-	if !cpuTracker.modelCached {
-		cpuTracker.cpuCount, _ = self.cpuProvider.Counts(true)
-		info, err := self.cpuProvider.Info()
-		if err == nil && len(info) > 0 {
-			cpuTracker.cpuModel = info[0].ModelName
-			cpuTracker.cpuFreq = info[0].Mhz
-		}
-		cpuTracker.modelCached = true
-	}
+	self.loadCPUStatic()
 
 	now := time.Now()
 	if now.Sub(cpuTracker.freqLastRead) > 2*time.Second {
-		cpuTracker.freqValue = getCurrentCPUFreq()
+		cpuTracker.dynamic = readCPUDynamicLive()
+		// The first online CPU's clock, as in /proc/cpuinfo, which on x86
+		// interrupts every CPU to read.
+		if i := slices.IndexFunc(cpuTracker.dynamic.coreMHz, func(f float64) bool { return f > 0 }); i >= 0 {
+			cpuTracker.freqValue = cpuTracker.dynamic.coreMHz[i]
+		} else {
+			cpuTracker.freqValue = getCurrentCPUFreq()
+		}
 		cpuTracker.freqLastRead = now
 	}
 	if cpuTracker.freqValue > 0 {
@@ -57,6 +62,19 @@ func (self *GopsUtil) GetCPUInfoWithCursor(cursor string) (*models.CPUInfo, erro
 	} else {
 		cpuInfo.Frequency = cpuTracker.cpuFreq
 	}
+
+	cpuInfo.CoreFrequencies = slices.Clone(cpuTracker.dynamic.coreMHz)
+	cpuInfo.Governor = cpuTracker.dynamic.governor
+	cpuInfo.EPP = cpuTracker.dynamic.epp
+	cpuInfo.MinFrequency = cpuTracker.static.minMHz
+	cpuInfo.MaxFrequency = cpuTracker.static.maxMHz
+	cpuInfo.PhysicalCores = cpuTracker.static.physicalCores
+	if c := cpuTracker.static.cache; c != nil {
+		cpuInfo.Cache = new(*c)
+	}
+	cpuInfo.BaseFrequency = cpuTracker.static.baseMHz
+	cpuInfo.Sockets = cpuTracker.static.sockets
+	cpuInfo.Virtualization = cpuTracker.virtualization
 
 	cpuInfo.Count = cpuTracker.cpuCount
 	cpuInfo.Model = cpuTracker.cpuModel
@@ -139,6 +157,32 @@ func (self *GopsUtil) GetCPUInfoWithCursor(cursor string) (*models.CPUInfo, erro
 	cpuInfo.Cursor = base64.RawURLEncoding.EncodeToString(cursorBytes)
 
 	return &cpuInfo, nil
+}
+
+// The caller holds cpuTracker.mu.
+func (self *GopsUtil) loadCPUStatic() {
+	if cpuTracker.modelCached {
+		return
+	}
+	cpuTracker.cpuCount, _ = self.cpuProvider.Counts(true)
+	info, err := self.cpuProvider.Info()
+	if err == nil && len(info) > 0 {
+		cpuTracker.cpuModel = info[0].ModelName
+		cpuTracker.cpuFreq = info[0].Mhz
+		cpuTracker.virtualization = cpuVirtualization(info[0].Flags)
+	}
+	cpuTracker.static = readCPUStaticLive()
+	cpuTracker.modelCached = true
+}
+
+func cpuVirtualization(flags []string) string {
+	switch {
+	case slices.Contains(flags, "svm"):
+		return "AMD-V"
+	case slices.Contains(flags, "vmx"):
+		return "VT-x"
+	}
+	return ""
 }
 
 func calculateCPUPercentage(prev, curr []float64) float64 {

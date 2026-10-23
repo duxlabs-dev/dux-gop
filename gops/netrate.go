@@ -15,6 +15,12 @@ type NetworkRateCursor struct {
 }
 
 func (self *GopsUtil) GetNetworkRates(cursorStr string) (*models.NetworkRateResponse, error) {
+	return self.GetNetworkRatesWithOptions(cursorStr, false)
+}
+
+// GetNetworkRatesWithOptions with allInterfaces set skips the interface name
+// filter, so virtual interfaces such as VPN tunnels and lo are included.
+func (self *GopsUtil) GetNetworkRatesWithOptions(cursorStr string, allInterfaces bool) (*models.NetworkRateResponse, error) {
 	// Get current network stats
 	netIO, err := net.IOCounters(true)
 	if err != nil {
@@ -23,7 +29,7 @@ func (self *GopsUtil) GetNetworkRates(cursorStr string) (*models.NetworkRateResp
 
 	currentStats := make(map[string]net.IOCountersStat)
 	for _, n := range netIO {
-		if matchesNetworkInterface(n.Name) {
+		if includeNetworkInterface(n.Name, allInterfaces) {
 			currentStats[n.Name] = n
 		}
 	}
@@ -68,6 +74,8 @@ func (self *GopsUtil) GetNetworkRates(cursorStr string) (*models.NetworkRateResp
 		}
 	}
 
+	fillLinkInfos(interfaces)
+
 	// Create new cursor
 	newCursor := NetworkRateCursor{
 		Timestamp: currentTime,
@@ -83,6 +91,10 @@ func (self *GopsUtil) GetNetworkRates(cursorStr string) (*models.NetworkRateResp
 		Interfaces: interfaces,
 		Cursor:     newCursorStr,
 	}, nil
+}
+
+func includeNetworkInterface(name string, allInterfaces bool) bool {
+	return allInterfaces || matchesNetworkInterface(name)
 }
 
 func encodeNetworkRateCursor(cursor NetworkRateCursor) (string, error) {

@@ -175,6 +175,42 @@ func RegisterHandlers(server *server.Server, grp *huma.Group) {
 	huma.Register(
 		grp,
 		huma.Operation{
+			OperationID: "sensors",
+			Summary:     "Get Sensors",
+			Description: "Get hardware sensor readings",
+			Path:        "/sensors",
+			Method:      http.MethodGet,
+		},
+		handlers.Sensors,
+	)
+
+	huma.Register(
+		grp,
+		huma.Operation{
+			OperationID: "process-detail",
+			Summary:     "Get Process Detail",
+			Description: "Get the on-demand details of one process: lifetime I/O, swap, open files, systemd unit and terminal",
+			Path:        "/process/{pid}",
+			Method:      http.MethodGet,
+		},
+		handlers.ProcessDetail,
+	)
+
+	huma.Register(
+		grp,
+		huma.Operation{
+			OperationID: "memory-modules",
+			Summary:     "Get Memory Modules",
+			Description: "Get information about the installed memory modules",
+			Path:        "/memory/modules",
+			Method:      http.MethodGet,
+		},
+		handlers.MemoryModules,
+	)
+
+	huma.Register(
+		grp,
+		huma.Operation{
 			OperationID: "meta",
 			Summary:     "Get Dynamic Metrics",
 			Description: "Get system metrics for specified modules (e.g., cpu,memory,network)",

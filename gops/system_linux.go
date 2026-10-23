@@ -9,15 +9,8 @@ import (
 )
 
 func taskCounts() (processes, threads int) {
-	entries, err := os.ReadDir("/proc")
-	if err == nil {
-		for _, entry := range entries {
-			name := entry.Name()
-			if name[0] >= '0' && name[0] <= '9' {
-				processes++
-			}
-		}
-	}
+	pids, _ := listProcPIDs("/proc")
+	processes = len(pids)
 
 	loadavg, err := os.ReadFile("/proc/loadavg")
 	if err != nil {

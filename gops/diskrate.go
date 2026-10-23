@@ -3,6 +3,7 @@ package gops
 import (
 	"encoding/base64"
 	"encoding/json"
+	"math"
 	"time"
 
 	"github.com/duxlabs-dev/dux-gop/models"
@@ -40,7 +41,7 @@ func (self *GopsUtil) GetDiskRates(cursorStr string) (*models.DiskRateResponse, 
 						readRate := float64(current.ReadBytes-prev.ReadBytes) / timeDiff
 						writeRate := float64(current.WriteBytes-prev.WriteBytes) / timeDiff
 
-						disks = append(disks, &models.DiskRateInfo{
+						info := &models.DiskRateInfo{
 							Device:     name,
 							ReadRate:   readRate,
 							WriteRate:  writeRate,
@@ -48,7 +49,11 @@ func (self *GopsUtil) GetDiskRates(cursorStr string) (*models.DiskRateResponse, 
 							WriteTotal: current.WriteBytes,
 							ReadCount:  current.ReadCount,
 							WriteCount: current.WriteCount,
-						})
+						}
+						if diskBusySupported {
+							info.Busy, info.ResponseTime = diskBusyAndResponse(prev, current, timeDiff)
+						}
+						disks = append(disks, info)
 					}
 				}
 			}
@@ -85,6 +90,24 @@ func (self *GopsUtil) GetDiskRates(cursorStr string) (*models.DiskRateResponse, 
 		Disks:  disks,
 		Cursor: newCursorStr,
 	}, nil
+}
+
+// diskBusyAndResponse derives busy % and mean response time (ms) between two
+// samples. Either is nil when its counters went backwards; response is also
+// nil when no I/O completed.
+func diskBusyAndResponse(prev, cur disk.IOCountersStat, elapsedSec float64) (busy, response *float64) {
+	if cur.IoTime >= prev.IoTime && elapsedSec > 0 {
+		b := float64(cur.IoTime-prev.IoTime) / (elapsedSec * 1000) * 100
+		b = math.Min(math.Max(b, 0), 100)
+		busy = &b
+	}
+	if cur.ReadCount >= prev.ReadCount && cur.WriteCount >= prev.WriteCount &&
+		cur.ReadTime >= prev.ReadTime && cur.WriteTime >= prev.WriteTime {
+		if ops := (cur.ReadCount - prev.ReadCount) + (cur.WriteCount - prev.WriteCount); ops > 0 {
+			response = new(float64((cur.ReadTime-prev.ReadTime)+(cur.WriteTime-prev.WriteTime)) / float64(ops))
+		}
+	}
+	return busy, response
 }
 
 func encodeDiskRateCursor(cursor DiskRateCursor) (string, error) {

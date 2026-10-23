@@ -20,10 +20,15 @@ var availableModules = []string{
 	"disk-rate",
 	"diskmounts",
 	"processes",
+	"process-gpu",
+	"process-io",
+	"process-net",
 	"system",
 	"hardware",
 	"gpu",
 	"gpu-temp",
+	"sensors",
+	"memory-modules",
 }
 
 func (self *GopsUtil) GetModules() (*models.ModulesInfo, error) {
@@ -33,25 +38,49 @@ func (self *GopsUtil) GetModules() (*models.ModulesInfo, error) {
 }
 
 type MetaParams struct {
-	SortBy         ProcSortBy
-	ProcLimit      int
-	EnableCPU      bool
-	MergeChildren  bool
+	SortBy        ProcSortBy
+	ProcLimit     int
+	EnableCPU     bool
+	MergeChildren bool
+	// GPUPciIds names GPUs by PCI ID or bus address; gpu, gpu-temp,
+	// process-gpu and sensors touch no other GPU, since any driver query can
+	// wake a suspended dGPU or keep an idle one awake.
 	GPUPciIds      []string
 	GPUCursor      string
 	CPUCursor      string
 	ProcCursor     string
 	NetRateCursor  string
 	DiskRateCursor string
+
+	NetRateAllInterfaces bool
+}
+
+// processOptions builds the process query, enabling the extras requested by
+// the process-gpu, process-io and process-net modifier modules.
+func (p MetaParams) processOptions(modules []string) (opts ProcessOptions, modifier bool) {
+	opts = ProcessOptions{SortBy: p.SortBy, Limit: p.ProcLimit, EnableCPU: p.EnableCPU, Cursor: p.ProcCursor, MergeChildren: p.MergeChildren, GPUPciIds: p.GPUPciIds}
+	for _, m := range modules {
+		switch strings.ToLower(m) {
+		case "process-gpu":
+			opts.GPU, modifier = true, true
+		case "process-io":
+			opts.IO, modifier = true, true
+		case "process-net":
+			opts.Net, modifier = true, true
+		}
+	}
+	return opts, modifier
 }
 
 func (self *GopsUtil) GetMeta(ctx context.Context, modules []string, params MetaParams) (*models.MetaInfo, error) {
 	meta := &models.MetaInfo{}
+	procOpts, modifier := params.processOptions(modules)
+	hasProcesses := false
 
 	for _, module := range modules {
 		switch strings.ToLower(module) {
 		case "all":
-			return self.loadAllModules(ctx, params)
+			return self.loadAllModules(ctx, params, procOpts)
 		case "cpu":
 			if cpu, err := self.GetCPUInfoWithCursor(params.CPUCursor); err == nil {
 				meta.CPU = cpu
@@ -65,7 +94,7 @@ func (self *GopsUtil) GetMeta(ctx context.Context, modules []string, params Meta
 				meta.Network = net
 			}
 		case "net-rate":
-			if netRate, err := self.GetNetworkRates(params.NetRateCursor); err == nil {
+			if netRate, err := self.GetNetworkRatesWithOptions(params.NetRateCursor, params.NetRateAllInterfaces); err == nil {
 				meta.NetRate = netRate
 			}
 		case "disk":
@@ -81,10 +110,8 @@ func (self *GopsUtil) GetMeta(ctx context.Context, modules []string, params Meta
 				meta.DiskMounts = mounts
 			}
 		case "processes":
-			if result, err := self.GetProcessesWithCursor(params.SortBy, params.ProcLimit, params.EnableCPU, params.ProcCursor, params.MergeChildren); err == nil {
-				meta.Processes = result.Processes
-				meta.Cursor = result.Cursor
-			}
+			hasProcesses = true
+		case "process-gpu", "process-io", "process-net":
 		case "system":
 			if sys, err := self.GetSystemInfo(); err == nil {
 				meta.System = sys
@@ -97,15 +124,30 @@ func (self *GopsUtil) GetMeta(ctx context.Context, modules []string, params Meta
 			if gpu, err := self.GetGPUInfoWithStats(params.GPUPciIds, params.GPUCursor); err == nil {
 				meta.GPU = gpu
 			}
+		case "sensors":
+			if sn, err := self.GetSensors(params.GPUPciIds); err == nil {
+				meta.Sensors = sn
+			}
+		case "memory-modules":
+			if mm, err := self.GetMemoryModules(); err == nil {
+				meta.MemoryModules = mm
+			}
 		default:
 			return nil, fmt.Errorf("unknown module: %s", module)
+		}
+	}
+
+	if hasProcesses || modifier {
+		if result, err := self.GetProcessesWithOptions(procOpts); err == nil {
+			meta.Processes = result.Processes
+			meta.Cursor = result.Cursor
 		}
 	}
 
 	return meta, nil
 }
 
-func (self *GopsUtil) loadAllModules(ctx context.Context, params MetaParams) (*models.MetaInfo, error) {
+func (self *GopsUtil) loadAllModules(ctx context.Context, params MetaParams, procOpts ProcessOptions) (*models.MetaInfo, error) {
 	meta := &models.MetaInfo{}
 	var mu sync.Mutex
 
@@ -168,7 +210,7 @@ func (self *GopsUtil) loadAllModules(ctx context.Context, params MetaParams) (*m
 			return ctx.Err()
 		default:
 		}
-		netRate, err := self.GetNetworkRates(params.NetRateCursor)
+		netRate, err := self.GetNetworkRatesWithOptions(params.NetRateCursor, params.NetRateAllInterfaces)
 		if err != nil {
 			log.Warn("failed to get network rates", "error", err)
 			return nil
@@ -236,7 +278,7 @@ func (self *GopsUtil) loadAllModules(ctx context.Context, params MetaParams) (*m
 			return ctx.Err()
 		default:
 		}
-		procs, err := self.GetProcessesWithCursor(params.SortBy, params.ProcLimit, params.EnableCPU, params.ProcCursor, params.MergeChildren)
+		procs, err := self.GetProcessesWithOptions(procOpts)
 		if err != nil {
 			log.Warn("failed to get processes", "error", err)
 			return nil
@@ -295,6 +337,40 @@ func (self *GopsUtil) loadAllModules(ctx context.Context, params MetaParams) (*m
 		}
 		mu.Lock()
 		meta.GPU = gpu
+		mu.Unlock()
+		return nil
+	})
+
+	g.Go(func() error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		v, err := self.GetSensors(params.GPUPciIds)
+		if err != nil {
+			log.Warn("failed to get sensors", "error", err)
+			return nil
+		}
+		mu.Lock()
+		meta.Sensors = v
+		mu.Unlock()
+		return nil
+	})
+
+	g.Go(func() error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		v, err := self.GetMemoryModules()
+		if err != nil {
+			log.Warn("failed to get memory modules", "error", err)
+			return nil
+		}
+		mu.Lock()
+		meta.MemoryModules = v
 		mu.Unlock()
 		return nil
 	})

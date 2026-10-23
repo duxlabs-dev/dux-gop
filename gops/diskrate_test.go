@@ -1,6 +1,7 @@
 package gops
 
 import (
+	"encoding/base64"
 	"testing"
 	"time"
 
@@ -219,4 +220,45 @@ func BenchmarkParseDiskRateCursor(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		parseDiskRateCursor(encoded)
 	}
+}
+
+func TestDiskBusyAndResponse(t *testing.T) {
+	prev := disk.IOCountersStat{IoTime: 1000, ReadCount: 100, WriteCount: 100, ReadTime: 50, WriteTime: 50}
+
+	cur := prev
+	cur.IoTime += 250
+	cur.ReadCount += 6
+	cur.WriteCount += 4
+	cur.ReadTime += 3
+	cur.WriteTime += 2
+	busy, resp := diskBusyAndResponse(prev, cur, 1)
+	require.NotNil(t, busy)
+	require.NotNil(t, resp)
+	assert.InDelta(t, 25, *busy, 1e-9)
+	assert.InDelta(t, 0.5, *resp, 1e-9)
+
+	busy, resp = diskBusyAndResponse(prev, prev, 1)
+	require.NotNil(t, busy)
+	assert.Zero(t, *busy)
+	assert.Nil(t, resp, "no completed I/O leaves the response time unknown, not 0")
+
+	cur = prev
+	cur.IoTime += 5000
+	busy, _ = diskBusyAndResponse(prev, cur, 1)
+	require.NotNil(t, busy)
+	assert.Equal(t, 100.0, *busy)
+
+	cur = prev
+	cur.IoTime = 10
+	cur.ReadCount = 1
+	busy, resp = diskBusyAndResponse(prev, cur, 1)
+	assert.Nil(t, busy)
+	assert.Nil(t, resp)
+}
+
+func TestOldFormatDiskCursorStillDecodes(t *testing.T) {
+	raw := `{"timestamp":"2024-01-01T12:00:00Z","iostats":{"sda":{"readCount":1,"writeCount":2,"readBytes":3,"writeBytes":4,"name":"sda"}}}`
+	cursor, err := parseDiskRateCursor(base64.StdEncoding.EncodeToString([]byte(raw)))
+	require.NoError(t, err)
+	assert.Equal(t, uint64(3), cursor.IOStats["sda"].ReadBytes)
 }

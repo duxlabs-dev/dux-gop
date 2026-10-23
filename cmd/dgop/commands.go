@@ -104,6 +104,24 @@ var modulesCmd = &cobra.Command{
 	Long:  "Display all available modules for the meta command.",
 }
 
+var sensorsCmd = &cobra.Command{
+	Use:   "sensors",
+	Short: "Get hwmon temperature, fan and power sensors",
+	Long:  "Display every readable hwmon temperature, fan and power sensor.",
+}
+
+var processCmd = &cobra.Command{
+	Use:   "process",
+	Short: "Get details of one process",
+	Long:  "Display lifetime I/O, swap, open files, systemd unit and terminal of one process (e.g., --pid 1234).",
+}
+
+var memoryModulesCmd = &cobra.Command{
+	Use:   "memory-modules",
+	Short: "Get installed memory modules",
+	Long:  "Display installed memory modules (slot, size, type, speed) from DMI data.",
+}
+
 var topCmd = &cobra.Command{
 	Use:   "top",
 	Short: "Launch interactive system monitor",
@@ -199,7 +217,10 @@ func runProcessesCommand(gopsUtil *gops.GopsUtil) error {
 	enableCPU := !disableProcCPU
 	sortBy := parseProcessSortBy(procSortBy, disableProcCPU)
 
-	result, err := gopsUtil.GetProcessesWithCursor(sortBy, procLimit, enableCPU, procCursor, mergeChildren)
+	result, err := gopsUtil.GetProcessesWithOptions(gops.ProcessOptions{
+		SortBy: sortBy, Limit: procLimit, EnableCPU: enableCPU, Cursor: procCursor,
+		MergeChildren: mergeChildren, GPU: procGPU, GPUPciIds: metaGPUPciIds, IO: procIO, Net: procNet,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to get processes: %w", err)
 	}
@@ -280,6 +301,8 @@ func runMetaCommand(gopsUtil *gops.GopsUtil) error {
 		ProcCursor:     procCursor,
 		NetRateCursor:  netRateCursor,
 		DiskRateCursor: diskRateCursor,
+
+		NetRateAllInterfaces: allInterfaces,
 	}
 
 	metaInfo, err := gopsUtil.GetMeta(context.Background(), metaModules, params)
@@ -380,6 +403,33 @@ func displayCPUInfo(cpu *models.CPUInfo) {
 		rows = append(rows, []string{"Core Usage:", coreUsageStr})
 	}
 
+	if cpu.MinFrequency > 0 || cpu.MaxFrequency > 0 {
+		rows = append(rows, []string{"Range:", fmt.Sprintf("%.0f - %.0f MHz", cpu.MinFrequency, cpu.MaxFrequency)})
+	}
+	if cpu.Governor != "" {
+		rows = append(rows, []string{"Governor:", cpu.Governor})
+	}
+	if cpu.EPP != "" {
+		rows = append(rows, []string{"EPP:", cpu.EPP})
+	}
+	if cpu.PhysicalCores > 0 {
+		rows = append(rows, []string{"Physical:", strconv.Itoa(cpu.PhysicalCores)})
+	}
+	if cpu.Cache != nil {
+		var levels []string
+		for _, l := range []struct {
+			name  string
+			bytes uint64
+		}{{"L1d", cpu.Cache.L1d}, {"L1i", cpu.Cache.L1i}, {"L2", cpu.Cache.L2}, {"L3", cpu.Cache.L3}} {
+			if l.bytes > 0 {
+				levels = append(levels, l.name+" "+formatBytes(l.bytes))
+			}
+		}
+		if len(levels) > 0 {
+			rows = append(rows, []string{"Cache:", strings.Join(levels, ", ")})
+		}
+	}
+
 	printTable(rows)
 }
 
@@ -463,22 +513,72 @@ func displayDiskInfo(disks []*models.DiskInfo, mounts []*models.DiskMountInfo) {
 func displayProcesses(processes []*models.ProcessInfo) {
 	fmt.Println(titleStyle.Render(fmt.Sprintf("PROCESSES (%d)", len(processes))))
 
-	// Header
-	header := fmt.Sprintf("%-8s %-8s %-20s %-8s %-8s %s",
-		"PID", "PPID", "COMMAND", "CPU%", "MEM%", "FULL COMMAND")
+	var hasGPU, hasIO, hasNet bool
+	for _, p := range processes {
+		hasGPU = hasGPU || p.GPU != nil || p.VRAMKB != nil
+		hasIO = hasIO || p.DiskRead != nil || p.DiskWrite != nil
+		hasNet = hasNet || p.Connections != nil || p.NetRx != nil || p.NetTx != nil
+	}
+
+	extraHdr := ""
+	if hasGPU {
+		extraHdr += fmt.Sprintf("%-8s %-10s ", "GPU%", "VRAM")
+	}
+	if hasIO {
+		extraHdr += fmt.Sprintf("%-10s %-10s ", "READ", "WRITE")
+	}
+	if hasNet {
+		extraHdr += fmt.Sprintf("%-8s %-10s %-10s ", "ONLINE", "DOWN", "UP")
+	}
+
+	header := fmt.Sprintf("%-8s %-8s %-20s %-8s %-8s %s%s",
+		"PID", "PPID", "COMMAND", "CPU%", "MEM%", extraHdr, "FULL COMMAND")
 	fmt.Println(keyStyle.Render(header))
 	fmt.Println(strings.Repeat("─", 80))
 
 	for _, proc := range processes {
-		row := fmt.Sprintf("%-8d %-8d %-20s %-8.1f %-8.1f %s",
+		extra := ""
+		if hasGPU {
+			vram := "—"
+			if proc.VRAMKB != nil {
+				vram = formatBytes(*proc.VRAMKB * 1024)
+			}
+			extra += fmt.Sprintf("%-8s %-10s ", optFloat(proc.GPU, "%.1f"), vram)
+		}
+		if hasIO {
+			extra += fmt.Sprintf("%-10s %-10s ", optRate(proc.DiskRead), optRate(proc.DiskWrite))
+		}
+		if hasNet {
+			online := "—"
+			if proc.Connections != nil {
+				online = strconv.Itoa(*proc.Connections)
+			}
+			extra += fmt.Sprintf("%-8s %-10s %-10s ", online, optRate(proc.NetRx), optRate(proc.NetTx))
+		}
+		row := fmt.Sprintf("%-8d %-8d %-20s %-8.1f %-8.1f %s%s",
 			proc.PID,
 			proc.PPID,
 			truncateString(proc.Command, 20),
 			proc.CPU,
 			proc.MemoryPercent,
+			extra,
 			truncateString(proc.FullCommand, 30))
 		fmt.Println(valueStyle.Render(row))
 	}
+}
+
+func optFloat(v *float64, format string) string {
+	if v == nil {
+		return "—"
+	}
+	return fmt.Sprintf(format, *v)
+}
+
+func optRate(v *float64) string {
+	if v == nil {
+		return "—"
+	}
+	return formatRate(*v)
 }
 
 // Helper functions
@@ -564,14 +664,56 @@ func displayGPUInfo(gpuInfo *models.GPUInfo) {
 		if gpu.MemoryUsed != nil && gpu.MemoryTotal != nil {
 			rows = append(rows, []string{"Memory:", formatBytes(*gpu.MemoryUsed*1024) + " / " + formatBytes(*gpu.MemoryTotal*1024)})
 		}
+		if gpu.GTTUsed != nil && gpu.GTTTotal != nil {
+			rows = append(rows, []string{"GTT:", formatBytes(*gpu.GTTUsed*1024) + " / " + formatBytes(*gpu.GTTTotal*1024)})
+		}
+		if gpu.MemoryBusy != nil {
+			rows = append(rows, []string{"Memory Busy:", fmt.Sprintf("%.0f%%", *gpu.MemoryBusy)})
+		}
+		if gpu.EncoderUsage != nil {
+			rows = append(rows, []string{"Encoder:", fmt.Sprintf("%.0f%%", *gpu.EncoderUsage)})
+		}
+		if gpu.DecoderUsage != nil {
+			rows = append(rows, []string{"Decoder:", fmt.Sprintf("%.0f%%", *gpu.DecoderUsage)})
+		}
+		if gpu.Hotspot != nil {
+			rows = append(rows, []string{"Hotspot:", fmt.Sprintf("%.1f°C", *gpu.Hotspot)})
+		}
+		if gpu.MemoryTemperature != nil {
+			rows = append(rows, []string{"Memory Temp:", fmt.Sprintf("%.1f°C", *gpu.MemoryTemperature)})
+		}
 		if gpu.Power != nil {
-			rows = append(rows, []string{"Power:", fmt.Sprintf("%.1f W", *gpu.Power)})
+			p := fmt.Sprintf("%.1f W", *gpu.Power)
+			if gpu.PowerLimit != nil {
+				p += fmt.Sprintf(" / %.1f W", *gpu.PowerLimit)
+			}
+			rows = append(rows, []string{"Power:", p})
 		}
 		if gpu.CoreClock != nil {
-			rows = append(rows, []string{"Core Clock:", fmt.Sprintf("%.0f MHz", *gpu.CoreClock)})
+			rows = append(rows, []string{"Core Clock:", mhzOfMax(*gpu.CoreClock, gpu.CoreClockMax)})
 		}
 		if gpu.MemoryClock != nil {
-			rows = append(rows, []string{"Memory Clock:", fmt.Sprintf("%.0f MHz", *gpu.MemoryClock)})
+			rows = append(rows, []string{"Memory Clock:", mhzOfMax(*gpu.MemoryClock, gpu.MemoryClockMax)})
+		}
+		if gpu.FanRpm != nil {
+			f := fmt.Sprintf("%d rpm", *gpu.FanRpm)
+			if gpu.FanMaxRpm != nil {
+				f += fmt.Sprintf(" / %d rpm", *gpu.FanMaxRpm)
+			}
+			rows = append(rows, []string{"Fan:", f})
+		}
+		if gpu.FanPercent != nil {
+			rows = append(rows, []string{"Fan Speed:", fmt.Sprintf("%.0f%%", *gpu.FanPercent)})
+		}
+		if gpu.PcieLinkSpeed != "" {
+			l := gpu.PcieLinkSpeed
+			if gpu.PcieLinkWidth > 0 {
+				l += fmt.Sprintf(" x%d", gpu.PcieLinkWidth)
+			}
+			if gpu.PcieLinkSpeedMax != "" {
+				l += fmt.Sprintf(" (max %s x%d)", gpu.PcieLinkSpeedMax, gpu.PcieLinkWidthMax)
+			}
+			rows = append(rows, []string{"PCIe:", l})
 		}
 
 		printTable(rows)
@@ -624,6 +766,16 @@ func displayMetaInfo(meta *models.MetaInfo) {
 
 	if meta.DiskRate != nil {
 		displayDiskRates(meta.DiskRate)
+		fmt.Println()
+	}
+
+	if meta.Sensors != nil {
+		displaySensors(meta.Sensors)
+		fmt.Println()
+	}
+
+	if meta.MemoryModules != nil {
+		displayMemoryModules(meta.MemoryModules)
 		fmt.Println()
 	}
 
@@ -707,6 +859,12 @@ func displayDiskRates(diskRates *models.DiskRateResponse) {
 			{"Read Count:", fmt.Sprintf("%d", disk.ReadCount)},
 			{"Write Count:", fmt.Sprintf("%d", disk.WriteCount)},
 		}
+		if disk.Busy != nil {
+			rows = append(rows, []string{"Busy:", fmt.Sprintf("%.1f%%", *disk.Busy)})
+		}
+		if disk.ResponseTime != nil {
+			rows = append(rows, []string{"Response:", fmt.Sprintf("%.2f ms", *disk.ResponseTime)})
+		}
 
 		printTable(rows)
 	}
@@ -732,7 +890,7 @@ func formatBytesFloat(bytes float64) string {
 }
 
 func runNetRateCommand(gopsUtil *gops.GopsUtil) error {
-	netRateInfo, err := gopsUtil.GetNetworkRates(netRateCursor)
+	netRateInfo, err := gopsUtil.GetNetworkRatesWithOptions(netRateCursor, allInterfaces)
 	if err != nil {
 		return fmt.Errorf("failed to get network rates: %w", err)
 	}
@@ -761,4 +919,153 @@ func runDiskRateCommand(gopsUtil *gops.GopsUtil) error {
 
 func runTopCommand(gopsUtil *gops.GopsUtil) error {
 	return runTUIWithOptions(gopsUtil, hideCPUCores, summarizeCores)
+}
+
+func runSensorsCommand(gopsUtil *gops.GopsUtil) error {
+	info, err := gopsUtil.GetSensors(metaGPUPciIds)
+	if err != nil {
+		return fmt.Errorf("failed to get sensors: %w", err)
+	}
+
+	if jsonOutput {
+		return outputJSON(info)
+	}
+
+	displaySensors(info)
+	return nil
+}
+
+func runMemoryModulesCommand(gopsUtil *gops.GopsUtil) error {
+	info, err := gopsUtil.GetMemoryModules()
+	if err != nil {
+		return fmt.Errorf("failed to get memory modules: %w", err)
+	}
+
+	if jsonOutput {
+		return outputJSON(info)
+	}
+
+	displayMemoryModules(info)
+	return nil
+}
+
+func mhzOfMax(v float64, max *float64) string {
+	if max == nil {
+		return fmt.Sprintf("%.0f MHz", v)
+	}
+	return fmt.Sprintf("%.0f / %.0f MHz", v, *max)
+}
+
+func displaySensors(info *models.SensorsInfo) {
+	fmt.Println(titleStyle.Render("SENSORS"))
+
+	if len(info.Sensors) == 0 {
+		fmt.Println(valueStyle.Render("  No sensors found"))
+		return
+	}
+
+	rows := [][]string{}
+	for _, s := range info.Sensors {
+		unit := "°C"
+		switch s.Kind {
+		case "fan":
+			unit = " rpm"
+		case "power":
+			unit = " W"
+		}
+		name := s.Chip
+		if s.Device != "" {
+			name += " (" + s.Device + ")"
+		}
+		val := fmt.Sprintf("%.1f%s", s.Value, unit)
+		if s.Max != nil {
+			val += fmt.Sprintf("  max %.1f%s", *s.Max, unit)
+		}
+		if s.Critical != nil {
+			val += fmt.Sprintf("  crit %.1f%s", *s.Critical, unit)
+		}
+		rows = append(rows, []string{name + " " + s.Label + ":", val})
+	}
+	printTable(rows)
+}
+
+func displayMemoryModules(info *models.MemoryModulesInfo) {
+	fmt.Println(titleStyle.Render("MEMORY MODULES"))
+
+	if len(info.Modules) == 0 {
+		fmt.Println(valueStyle.Render("  No memory modules found"))
+		return
+	}
+
+	fmt.Println(keyStyle.Render(fmt.Sprintf("Slots: %d", info.Slots)))
+
+	for _, m := range info.Modules {
+		fmt.Println()
+		fmt.Println(keyStyle.Render(fmt.Sprintf("Module: %s", m.Locator)))
+
+		rows := [][]string{{"Size:", formatBytes(m.Size * 1024)}}
+		if m.Type != "" {
+			rows = append(rows, []string{"Type:", m.Type})
+		}
+		if m.Speed > 0 {
+			rows = append(rows, []string{"Speed:", fmt.Sprintf("%d MT/s", m.Speed)})
+		}
+		if m.ConfiguredSpeed > 0 {
+			rows = append(rows, []string{"Configured:", fmt.Sprintf("%d MT/s", m.ConfiguredSpeed)})
+		}
+		if m.Manufacturer != "" {
+			rows = append(rows, []string{"Manufacturer:", m.Manufacturer})
+		}
+		if m.PartNumber != "" {
+			rows = append(rows, []string{"Part Number:", m.PartNumber})
+		}
+		if m.FormFactor != "" {
+			rows = append(rows, []string{"Form Factor:", m.FormFactor})
+		}
+		printTable(rows)
+	}
+}
+
+func runProcessCommand(gopsUtil *gops.GopsUtil) error {
+	detail, err := gopsUtil.GetProcessDetail(processPid)
+	if err != nil {
+		return fmt.Errorf("failed to get process detail: %w", err)
+	}
+
+	if jsonOutput {
+		return outputJSON(detail)
+	}
+
+	displayProcessDetail(detail)
+	return nil
+}
+
+func displayProcessDetail(d *models.ProcessDetail) {
+	fmt.Println(titleStyle.Render("PROCESS"))
+
+	unknown := "—"
+	bytesOr := func(v *uint64, scale uint64) string {
+		if v == nil {
+			return unknown
+		}
+		return formatBytes(*v * scale)
+	}
+	openFiles := unknown
+	if d.OpenFiles != nil {
+		openFiles = fmt.Sprint(*d.OpenFiles)
+	}
+	unit := d.Unit
+	if unit == "" {
+		unit = unknown
+	}
+
+	printTable([][]string{
+		{"PID:", fmt.Sprint(d.PID)},
+		{"Read total:", bytesOr(d.ReadTotal, 1)},
+		{"Written total:", bytesOr(d.WriteTotal, 1)},
+		{"Swap:", bytesOr(d.SwapKB, 1024)},
+		{"Open files:", openFiles},
+		{"Unit:", unit},
+		{"Terminal:", fmt.Sprint(d.Terminal)},
+	})
 }

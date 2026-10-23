@@ -1,8 +1,11 @@
 package gops
 
 import (
+	"time"
+
 	"github.com/duxlabs-dev/dux-go/log"
 	"github.com/duxlabs-dev/dux-gop/models"
+	"github.com/shirou/gopsutil/v4/host"
 	"github.com/shirou/gopsutil/v4/sensors"
 )
 
@@ -15,10 +18,16 @@ type GopsUtil struct {
 	hostProvider HostInfoProvider
 	loadProvider LoadInfoProvider
 	fs           FileSystem
+
+	pss pssCache
+
+	detectGPUEntries func() ([]gpuEntry, error)
+	sampleGPUs       func([]gpuEntry, gpuCursor, time.Time) ([]gpuSample, gpuCursor)
+	platformSources
 }
 
 func NewGopsUtil() *GopsUtil {
-	return &GopsUtil{
+	return withDefaultSources(&GopsUtil{
 		cpuProvider:  &DefaultCPUInfoProvider{},
 		memProvider:  &DefaultMemoryInfoProvider{},
 		diskProvider: &DefaultDiskInfoProvider{},
@@ -27,7 +36,7 @@ func NewGopsUtil() *GopsUtil {
 		hostProvider: &DefaultHostInfoProvider{},
 		loadProvider: &DefaultLoadInfoProvider{},
 		fs:           &DefaultFileSystem{},
-	}
+	})
 }
 
 // NewGopsUtilWithProviders creates a GopsUtil with custom providers (for testing)
@@ -41,7 +50,7 @@ func NewGopsUtilWithProviders(
 	load LoadInfoProvider,
 	fs FileSystem,
 ) *GopsUtil {
-	return &GopsUtil{
+	return withDefaultSources(&GopsUtil{
 		cpuProvider:  cpu,
 		memProvider:  mem,
 		diskProvider: disk,
@@ -50,8 +59,21 @@ func NewGopsUtilWithProviders(
 		hostProvider: host,
 		loadProvider: load,
 		fs:           fs,
-	}
+	})
 }
+
+func withDefaultSources(g *GopsUtil) *GopsUtil {
+	// The system module reads boot time on every call; it never changes.
+	host.EnableBootTimeCache(true)
+	g.detectGPUEntries = detectGPUEntries
+	g.sampleGPUs = g.defaultGPUSampler()
+	g.platformSources = defaultPlatformSources()
+	return g
+}
+
+// Close stops the background socket listener that process-net starts. It is
+// idempotent; a short-lived GopsUtil may skip it.
+func (self *GopsUtil) Close() { self.closePlatform() }
 
 func (self *GopsUtil) GetAllMetrics(procSortBy ProcSortBy, procLimit int, enableProcessCPU bool, mergeChildren bool) (*models.SystemMetrics, error) {
 	return self.GetAllMetricsWithCursors(procSortBy, procLimit, enableProcessCPU, "", "", mergeChildren)
