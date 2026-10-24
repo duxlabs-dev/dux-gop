@@ -147,7 +147,8 @@ func getMaxACPITZTemperature(thermalPath string, thermalEntries []os.DirEntry, m
 			continue
 		}
 
-		if thermalType != "acpitz" {
+		// Device-tree SoCs (e.g. Snapdragon) have no acpitz, only per-core cpu*-thermal zones.
+		if thermalType != "acpitz" && !strings.HasPrefix(thermalType, "cpu") {
 			continue
 		}
 

@@ -59,3 +59,58 @@ func TestReadCoretempInputMissing(t *testing.T) {
 	_, _, ok := readCoretempInput(t.TempDir())
 	assert.False(t, ok, "Should report no reading when no temp inputs exist")
 }
+
+func writeZone(t *testing.T, root, zone, zoneType, temp string) {
+	t.Helper()
+	dir := filepath.Join(root, zone)
+	assert.NoError(t, os.MkdirAll(dir, 0o755))
+	writeTemp(t, dir, "type", zoneType+"\n")
+	writeTemp(t, dir, "temp", temp+"\n")
+}
+
+func TestGetMaxACPITZTemperatureZoneTypes(t *testing.T) {
+	tests := []struct {
+		name     string
+		zones    [][3]string
+		want     float64
+		wantZone string
+	}{
+		{
+			// Snapdragon 8cx Gen 3 (ThinkPad X13s): no ACPI, one zone per core.
+			name: "device tree per-core zones",
+			zones: [][3]string{
+				{"thermal_zone0", "gpu-thermal", "61000"},
+				{"thermal_zone1", "cpu0-thermal", "38000"},
+				{"thermal_zone5", "cpu4-thermal", "52500"},
+				{"thermal_zone11", "qcom-battmgr-bat", "30500"},
+			},
+			want:     52.5,
+			wantZone: "thermal_zone5",
+		},
+		{
+			name: "acpi",
+			zones: [][3]string{
+				{"thermal_zone0", "acpitz", "47000"},
+				{"thermal_zone1", "x86_pkg_temp", "65000"},
+			},
+			want:     47,
+			wantZone: "thermal_zone0",
+		},
+	}
+
+	t.Cleanup(func() { cpuTracker.tempPath = "" })
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			for _, z := range tt.zones {
+				writeZone(t, root, z[0], z[1], z[2])
+			}
+			entries, err := os.ReadDir(root)
+			assert.NoError(t, err)
+
+			cpuTracker.tempPath = ""
+			assert.Equal(t, tt.want, getMaxACPITZTemperature(root, entries, 20, 100, true))
+			assert.Equal(t, filepath.Join(root, tt.wantZone, "temp"), cpuTracker.tempPath)
+		})
+	}
+}
