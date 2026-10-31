@@ -66,7 +66,9 @@ func encodeProcessCursorWithGPU(entries []models.ProcessCursorData, gpuMillis in
 		wire.CPUMillis = append(wire.CPUMillis, int64(math.Round(e.Ticks*1000)))
 		wire.OffsetMillis = append(wire.OffsetMillis, e.Timestamp-wire.BaseMillis)
 	}
-	if len(gpuCounters) > 0 {
+	// The timestamp is written even without counters, so a sample that found
+	// no DRM client is still a baseline for the next request.
+	if gpuMillis > 0 {
 		wire.GPUMillis = gpuMillis
 		for pid, counters := range gpuCounters {
 			for key, value := range counters {
@@ -172,9 +174,11 @@ type ProcessOptions struct {
 	SortBy    ProcSortBy
 	Limit     int
 	EnableCPU bool
-	// EnableGPU reads every process's DRM file descriptors and runs nvidia-smi
-	// pmon on awake NVIDIA cards. Sorting by GPU turns it on.
+	// EnableGPU samples per-process usage of the GPUs named in GPUPciIds:
+	// DRM file descriptors for DRM cards, nvidia-smi pmon for NVIDIA cards.
+	// Sorting by GPU turns it on.
 	EnableGPU     bool
+	GPUPciIds     []string
 	Cursor        string
 	MergeChildren bool
 }
@@ -199,7 +203,10 @@ func (self *GopsUtil) GetProcessesWithOptions(opts ProcessOptions) (*models.Proc
 	var gpuEntries []gpuEntry
 	var gpuPrev processGPUSample
 	if enableGPU {
-		gpuEntries, _ = detectGPUEntries()
+		gpuEntries = requestedGPUEntries(opts.GPUPciIds)
+		enableGPU = len(gpuEntries) > 0
+	}
+	if enableGPU {
 		gpuPrev = decodeProcessGPUCursor(opts.Cursor)
 	}
 	gpuBaseline := enableGPU && gpuPrev.TimeMs == 0

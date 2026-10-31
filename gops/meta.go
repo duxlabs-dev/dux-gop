@@ -52,6 +52,7 @@ func (params MetaParams) processOptions() ProcessOptions {
 		Limit:         params.ProcLimit,
 		EnableCPU:     params.EnableCPU,
 		EnableGPU:     params.EnableGPU,
+		GPUPciIds:     params.GPUPciIds,
 		Cursor:        params.ProcCursor,
 		MergeChildren: params.MergeChildren,
 	}

@@ -204,6 +204,7 @@ func runProcessesCommand(gopsUtil *gops.GopsUtil) error {
 		Limit:         procLimit,
 		EnableCPU:     enableCPU,
 		EnableGPU:     enableProcGPU,
+		GPUPciIds:     metaGPUPciIds,
 		Cursor:        procCursor,
 		MergeChildren: mergeChildren,
 	})

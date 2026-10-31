@@ -19,7 +19,7 @@ type MetaInput struct {
 	MergeChildren  bool            `query:"merge_children" default:"true"`
 
 	// Module-specific parameters
-	GPUPciIds      []string `query:"gpu_pci_ids" example:"10de:2684,1002:164e" doc:"PCI IDs or bus addresses of GPUs to sample live metrics for (when gpu module is requested)"`
+	GPUPciIds      []string `query:"gpu_pci_ids" example:"10de:2684,1002:164e" doc:"PCI IDs or bus addresses of GPUs to sample live metrics for (when gpu module is requested) and per-process usage for (with enable_proc_gpu or sort_by=gpu)"`
 	GPUCursor      string   `query:"gpu_cursor" doc:"GPU cursor from previous request"`
 	CPUCursor      string   `query:"cpu_cursor" doc:"CPU cursor from previous request"`
 	ProcCursor     string   `query:"proc_cursor" doc:"Process cursor from previous request"`

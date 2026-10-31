@@ -32,18 +32,29 @@ func scanProcessGPU(pids []int32, entries []gpuEntry, now time.Time) processGPUS
 	return defaultProcessGPUScanner.scan(pids, entries, now)
 }
 
+// scan samples the given GPUs only. DRM cards are read from the processes'
+// fdinfo, NVIDIA cards from nvidia-smi pmon. Runtime-suspended cards are skipped
+// since reading xe fdinfo resumes the device.
 func (s processGPUScanner) scan(pids []int32, entries []gpuEntry, now time.Time) processGPUSample {
 	sample := newProcessGPUSample(now)
-	suspended := map[string]bool{}
-
-	for _, pid := range pids {
-		s.scanProcess(pid, sample, suspended)
-	}
 
 	var nvidia []string
+	drm := map[string]bool{}
 	for _, entry := range entries {
-		if entry.Driver == "nvidia" && entry.BusId != "" && !isRuntimeSuspended(filepath.Join(s.pciDevices, entry.BusId)) {
+		if entry.BusId == "" || isRuntimeSuspended(filepath.Join(s.pciDevices, entry.BusId)) {
+			continue
+		}
+		if entry.Driver == "nvidia" {
 			nvidia = append(nvidia, entry.BusId)
+		} else {
+			drm[entry.BusId] = true
+		}
+	}
+
+	if len(drm) > 0 {
+		nodes := map[string]bool{}
+		for _, pid := range pids {
+			s.scanProcess(pid, sample, drm, nodes)
 		}
 	}
 	if len(nvidia) > 0 {
@@ -55,9 +66,10 @@ func (s processGPUScanner) scan(pids []int32, entries []gpuEntry, now time.Time)
 	return sample
 }
 
-// scanProcess reads the DRM usage stats of every GPU file the process holds.
-// Other users' processes are not readable and are skipped.
-func (s processGPUScanner) scanProcess(pid int32, sample processGPUSample, suspended map[string]bool) {
+// scanProcess reads the DRM usage stats of the process's files on the cards in
+// drm, keyed by bus address. nodes caches whether a /dev/dri node is on one of
+// them. Other users' processes are not readable and are skipped.
+func (s processGPUScanner) scanProcess(pid int32, sample processGPUSample, drm, nodes map[string]bool) {
 	pidDir := filepath.Join(s.procRoot, strconv.Itoa(int(pid)))
 	fds, err := os.ReadDir(filepath.Join(pidDir, "fd"))
 	if err != nil {
@@ -71,14 +83,14 @@ func (s processGPUScanner) scanProcess(pid int32, sample processGPUSample, suspe
 			continue
 		}
 
-		// Reading fdinfo of an xe client resumes the device.
 		node := filepath.Base(target)
-		asleep, known := suspended[node]
+		wanted, known := nodes[node]
 		if !known {
-			asleep = isRuntimeSuspended(filepath.Join(s.drmClass, node, "device"))
-			suspended[node] = asleep
+			device, err := os.Readlink(filepath.Join(s.drmClass, node, "device"))
+			wanted = err == nil && drm[filepath.Base(device)]
+			nodes[node] = wanted
 		}
-		if asleep {
+		if !wanted {
 			continue
 		}
 

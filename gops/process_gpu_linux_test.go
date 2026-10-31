@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/AvengeMedia/dgop/models"
+	"github.com/duxlabs-dev/dux-gop/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -139,39 +139,85 @@ func TestParseNvidiaPmon(t *testing.T) {
 	assert.Equal(t, 30.0, processGPUUsage(processGPUSample{}, sample)[2539])
 }
 
-func TestScanProcessGPUSkipsSuspendedDevices(t *testing.T) {
+// newTestGPUScanner lays out a fake /proc, /sys/class/drm and PCI tree. Process
+// 100 holds a render node on the amdgpu card 0000:09:00.0 and one on the xe
+// card 0000:03:00.0.
+func newTestGPUScanner(t *testing.T, pciStatus map[string]string, pmon func([]string) ([]byte, error)) processGPUScanner {
 	root := t.TempDir()
 	s := processGPUScanner{
 		procRoot:   filepath.Join(root, "proc"),
 		drmClass:   filepath.Join(root, "drm"),
 		pciDevices: filepath.Join(root, "pci"),
-		nvidiaPmon: func([]string) ([]byte, error) {
-			t.Fatal("pmon must not run for a suspended card")
-			return nil, nil
-		},
+		nvidiaPmon: pmon,
 	}
 	files := map[string]string{
-		"proc/100/fdinfo/5":                          amdgpuFdinfo,
-		"proc/100/fdinfo/6":                          xeFdinfo,
-		"drm/renderD128/device/power/runtime_status": "active",
-		"drm/renderD129/device/power/runtime_status": "suspended",
-		"pci/0000:01:00.0/power/runtime_status":      "suspended",
+		"proc/100/fdinfo/5": amdgpuFdinfo,
+		"proc/100/fdinfo/6": xeFdinfo,
+	}
+	for bus, status := range pciStatus {
+		files["pci/"+bus+"/power/runtime_status"] = status
 	}
 	for name, content := range files {
 		path := filepath.Join(root, name)
 		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 		require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
 	}
+	for node, bus := range map[string]string{"renderD128": "0000:09:00.0", "renderD129": "0000:03:00.0"} {
+		require.NoError(t, os.MkdirAll(filepath.Join(root, "drm", node), 0o755))
+		require.NoError(t, os.Symlink(filepath.Join(root, "pci", bus), filepath.Join(root, "drm", node, "device")))
+	}
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "proc/100/fd"), 0o755))
 	require.NoError(t, os.Symlink("/dev/dri/renderD128", filepath.Join(root, "proc/100/fd/5")))
 	require.NoError(t, os.Symlink("/dev/dri/renderD129", filepath.Join(root, "proc/100/fd/6")))
 	require.NoError(t, os.Symlink("/dev/null", filepath.Join(root, "proc/100/fd/7")))
+	return s
+}
 
-	sample := s.scan([]int32{100, 101}, []gpuEntry{{Driver: "nvidia", BusId: "0000:01:00.0"}}, time.Unix(10, 0))
+func TestScanProcessGPUSkipsSuspendedDevices(t *testing.T) {
+	s := newTestGPUScanner(t, map[string]string{
+		"0000:09:00.0": "active",
+		"0000:03:00.0": "suspended",
+		"0000:01:00.0": "suspended",
+	}, func([]string) ([]byte, error) {
+		t.Fatal("pmon must not run for a suspended card")
+		return nil, nil
+	})
+
+	sample := s.scan([]int32{100, 101}, []gpuEntry{
+		{Driver: "amdgpu", BusId: "0000:09:00.0"},
+		{Driver: "xe", BusId: "0000:03:00.0"},
+		{Driver: "nvidia", BusId: "0000:01:00.0"},
+	}, time.Unix(10, 0))
 
 	assert.True(t, sample.Clients[100])
 	assert.Contains(t, sample.Counters[100], "0000:09:00.0/15/gfx/ns")
 	assert.NotContains(t, sample.Counters[100], "0000:03:00.0/7/rcs/cyc", "fdinfo of a sleeping xe card is not read")
+}
+
+func TestScanProcessGPUReadsOnlyRequestedGPUs(t *testing.T) {
+	var pmonIds []string
+	s := newTestGPUScanner(t, map[string]string{
+		"0000:09:00.0": "active",
+		"0000:03:00.0": "active",
+	}, func(ids []string) ([]byte, error) {
+		pmonIds = ids
+		return nil, nil
+	})
+
+	sample := s.scan([]int32{100}, []gpuEntry{
+		{Driver: "xe", BusId: "0000:03:00.0"},
+		{Driver: "nvidia", BusId: "0000:02:00.0"},
+	}, time.Unix(10, 0))
+
+	assert.Contains(t, sample.Counters[100], "0000:03:00.0/7/rcs/cyc")
+	assert.NotContains(t, sample.Counters[100], "0000:09:00.0/15/gfx/ns", "the amdgpu card was not asked for")
+	assert.Equal(t, []string{"0000:02:00.0"}, pmonIds)
+}
+
+func TestScanProcessGPUWithOnlyNvidiaSkipsFdScan(t *testing.T) {
+	s := newTestGPUScanner(t, nil, func([]string) ([]byte, error) { return nil, nil })
+	sample := s.scan([]int32{100}, []gpuEntry{{Driver: "nvidia", BusId: "0000:01:00.0"}}, time.Unix(10, 0))
+	assert.Empty(t, sample.Clients)
 }
 
 func TestProcessCursorCarriesGPUCounters(t *testing.T) {
@@ -185,6 +231,15 @@ func TestProcessCursorCarriesGPUCounters(t *testing.T) {
 	assert.Equal(t, int64(5000), gpu.TimeMs)
 	assert.Equal(t, uint64(123), gpu.Counters[7]["amd/15/gfx/ns"])
 	assert.Equal(t, int64(0), decodeProcessGPUCursor(encodeProcessCursor(entries)).TimeMs, "an old cursor has no GPU baseline")
+}
+
+func TestProcessCursorKeepsGPUBaselineWithoutCounters(t *testing.T) {
+	entries := []models.ProcessCursorData{{PID: 7, Ticks: 1.5, Timestamp: 1000}}
+
+	gpu := decodeProcessGPUCursor(encodeProcessCursorWithGPU(entries, 5000, nil))
+
+	assert.Equal(t, int64(5000), gpu.TimeMs, "a sample without DRM clients is still a baseline")
+	assert.Empty(t, gpu.Counters)
 }
 
 func TestMergeAndSortByGPU(t *testing.T) {

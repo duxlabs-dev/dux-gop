@@ -20,6 +20,25 @@ type processGPUSample struct {
 	MemoryKB map[int32]uint64
 }
 
+// requestedGPUEntries picks the detected GPUs named by ids the way
+// GetGPUInfoWithStats does. No ids means no GPU.
+func requestedGPUEntries(ids []string) []gpuEntry {
+	if len(ids) == 0 {
+		return nil
+	}
+	entries, err := detectGPUEntries()
+	if err != nil {
+		return nil
+	}
+	var targets []gpuEntry
+	for i, gpu := range gpusFromEntries(entries) {
+		if gpuRequested(gpu, ids) {
+			targets = append(targets, entries[i])
+		}
+	}
+	return targets
+}
+
 func newProcessGPUSample(now time.Time) processGPUSample {
 	return processGPUSample{
 		TimeMs:   now.UnixMilli(),

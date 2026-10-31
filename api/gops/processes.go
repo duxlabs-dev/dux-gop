@@ -14,6 +14,7 @@ type ProcessInput struct {
 	Limit          int             `query:"limit"`
 	DisableProcCPU bool            `query:"disable_proc_cpu" default:"false"`
 	EnableProcGPU  bool            `query:"enable_proc_gpu" default:"false" doc:"Sample per-process GPU usage (implied by sort_by=gpu)"`
+	GPUPciIds      []string        `query:"gpu_pci_ids" example:"10de:2684,0000:03:00.0" doc:"PCI IDs or bus addresses of GPUs to sample per-process usage for"`
 	Cursor         string          `query:"cursor" required:"false"`
 	MergeChildren  bool            `query:"merge_children" default:"true"`
 }
@@ -32,6 +33,7 @@ func (self *HandlerGroup) Processes(ctx context.Context, input *ProcessInput) (*
 		Limit:         input.Limit,
 		EnableCPU:     !input.DisableProcCPU,
 		EnableGPU:     input.EnableProcGPU,
+		GPUPciIds:     input.GPUPciIds,
 		Cursor:        input.Cursor,
 		MergeChildren: input.MergeChildren,
 	})
