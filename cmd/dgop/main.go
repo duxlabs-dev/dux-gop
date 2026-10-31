@@ -17,6 +17,7 @@ var (
 	procSortBy     string
 	procLimit      int
 	disableProcCPU bool
+	enableProcGPU  bool
 	mergeChildren  bool
 	metaModules    []string
 	gpuPciId       string
@@ -75,15 +76,18 @@ func init() {
 
 	diskRateCmd.Flags().StringVar(&diskRateCursor, "cursor", "", "Cursor from previous disk rate request")
 
-	processesCmd.Flags().StringVar(&procSortBy, "sort", "cpu", "Sort processes by (cpu, memory, name, pid)")
+	processesCmd.Flags().StringVar(&procSortBy, "sort", "cpu", "Sort processes by (cpu, memory, name, pid, gpu)")
 	processesCmd.Flags().IntVar(&procLimit, "limit", 0, "Limit number of processes (0 = no limit)")
 	processesCmd.Flags().StringVar(&procCursor, "cursor", "", "Cursor from previous process request")
 	processesCmd.Flags().BoolVar(&mergeChildren, "merge-children", true, "Merge child processes with same executable")
+	processesCmd.Flags().BoolVar(&enableProcGPU, "proc-gpu", false, "Sample per-process GPU usage of the --gpu-pci-ids GPUs (implied by --sort gpu)")
+	processesCmd.Flags().StringSliceVar(&metaGPUPciIds, "gpu-pci-ids", []string{}, "PCI IDs or bus addresses of GPUs to sample per-process usage for (e.g., 10de:2684,0000:03:00.0)")
 
 	metaCmd.Flags().StringSliceVar(&metaModules, "modules", []string{"all"}, "Modules to include (cpu,memory,network,etc)")
-	metaCmd.Flags().StringVar(&procSortBy, "sort", "cpu", "Sort processes by (cpu, memory, name, pid)")
+	metaCmd.Flags().StringVar(&procSortBy, "sort", "cpu", "Sort processes by (cpu, memory, name, pid, gpu)")
 	metaCmd.Flags().IntVar(&procLimit, "limit", 0, "Limit number of processes (0 = no limit)")
 	metaCmd.Flags().StringSliceVar(&metaGPUPciIds, "gpu-pci-ids", []string{}, "PCI IDs or bus addresses of GPUs to sample (e.g., 10de:2684,0000:03:00.0)")
+	metaCmd.Flags().BoolVar(&enableProcGPU, "proc-gpu", false, "Sample per-process GPU usage of the --gpu-pci-ids GPUs (implied by --sort gpu)")
 	metaCmd.Flags().StringVar(&gpuCursor, "gpu-cursor", "", "GPU cursor from previous request")
 	metaCmd.Flags().StringVar(&cpuCursor, "cpu-cursor", "", "CPU cursor from previous request")
 	metaCmd.Flags().StringVar(&procCursor, "proc-cursor", "", "Process cursor from previous request")
@@ -235,6 +239,8 @@ func parseProcessSortBy(sortBy string, cpuDisabled bool) gops.ProcSortBy {
 		return gops.SortByName
 	case "pid":
 		return gops.SortByPID
+	case "gpu":
+		return gops.SortByGPU
 	default:
 		// Default behavior: CPU if enabled, memory if CPU disabled
 		if cpuDisabled {

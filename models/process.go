@@ -17,6 +17,9 @@ type ProcessInfo struct {
 	FullCommand       string  `json:"fullCommand"`
 	ExecutablePath    string  `json:"executablePath,omitempty"`
 	ChildCount        int     `json:"childCount,omitempty"`
+	// Only set for processes with an open GPU client when GPU sampling is enabled.
+	GPU         *float64 `json:"gpu,omitempty" doc:"Percentage of the busiest GPU this process used since the cursor, in the range 0-100."`
+	GPUMemoryKB *uint64  `json:"gpuMemoryKB,omitempty" doc:"Device-local GPU memory resident for this process, in KB."`
 }
 
 type ProcessCursorData struct {
