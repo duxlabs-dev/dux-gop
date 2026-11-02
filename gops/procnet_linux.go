@@ -51,7 +51,7 @@ type procNetReader struct {
 
 func (self *GopsUtil) newProcNetReader() *procNetReader {
 	self.tails.start(self.sockDestroys)
-	r := &procNetReader{netDump: netDump{tail: self.tails.get}, netNS: ownNetNS()}
+	r := &procNetReader{netDump: netDump{tail: self.tails.get}, netNS: self.netNS()}
 	at := time.Now().UnixMilli()
 	entries, err := self.sockDump()
 	if err != nil {

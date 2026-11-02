@@ -18,7 +18,7 @@ COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 # Build flags with version info
 BUILD_LDFLAGS=-ldflags="-s -w -X main.Version=$(VERSION) -X main.buildTime=$(BUILD_TIME) -X main.commit=$(COMMIT)"
 
-.PHONY: all build clean install uninstall test fmt vet deps help
+.PHONY: all build clean install uninstall test test-integration fmt vet deps help
 
 # Default target
 all: build
@@ -54,6 +54,10 @@ clean:
 test:
 	@echo "Running tests..."
 	$(GO) test -v ./...
+
+test-integration:
+	@echo "Running integration tests against the live host..."
+	$(GO) test -v -tags integration ./...
 
 # Format Go code
 fmt:

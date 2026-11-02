@@ -55,8 +55,12 @@ func getBIOSInfo() models.BIOSInfo {
 	return biosInfo
 }
 
-func getDistroName() string {
-	content, err := readFile("/etc/os-release")
+const osReleasePath = "/etc/os-release"
+
+func getDistroName() string { return distroName(osReleasePath) }
+
+func distroName(path string) string {
+	content, err := readFile(path)
 	if err != nil {
 		return "Unknown"
 	}

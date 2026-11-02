@@ -220,9 +220,17 @@ func TestCalculateProcessCPUPercentageRealWorld(t *testing.T) {
 	}
 }
 
-func TestGetPssDirty(t *testing.T) {
-	_, err := getPssDirty(999999)
-	assert.Error(t, err, "Should error for non-existent PID")
+// Cursor written before the process extras existed: pids 1 and 2 only.
+const legacyProcCursor = "H4sIAAAAAAAC_6tWKlGyMjQ3QAAdpYLMFCWraEMdo1gdpeSCUhAbJG4EJIAiKUAN0QY6prG1APp9R3w8AAAA"
+
+func TestLegacyProcessCursorHasNoExtras(t *testing.T) {
+	procs, net := decodeCursor(legacyProcCursor)
+	assert.Len(t, procs, 2)
+	for pid, p := range procs {
+		assert.False(t, p.ioOK || p.gpuOK, "extras on %d", pid)
+		assert.Zero(t, p.start, "start on %d", pid)
+	}
+	assert.Zero(t, net.at)
 }
 
 func TestProcessCursorRoundTrip(t *testing.T) {

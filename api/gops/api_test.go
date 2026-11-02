@@ -1,149 +1,139 @@
 package gops_handler_test
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"testing"
-	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/humatest"
 	gops_handler "github.com/duxlabs-dev/dux-gop/api/gops"
 	"github.com/duxlabs-dev/dux-gop/api/server"
 	"github.com/duxlabs-dev/dux-gop/gops"
+	"github.com/duxlabs-dev/dux-gop/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// Cursor written before the process extras existed: pids 1 and 2 only.
-const legacyProcCursor = "H4sIAAAAAAAC_6tWKlGyMjQ3QAAdpYLMFCWraEMdo1gdpeSCUhAbJG4EJIAiKUAN0QY6prG1APp9R3w8AAAA"
-
-func newAPI(t *testing.T) humatest.TestAPI {
-	_, api := humatest.New(t)
-	gops_handler.RegisterHandlers(&server.Server{Gops: gops.NewGopsUtil()}, huma.NewGroup(api, "/gops"))
-	return api
+// fakeCollector answers the handlers under test; any other call reaches the
+// nil embedded Collector and panics.
+type fakeCollector struct {
+	server.Collector
+	meta    func(modules []string, params gops.MetaParams) (*models.MetaInfo, error)
+	procs   func(opts gops.ProcessOptions) (*models.ProcessListResponse, error)
+	detail  func(pid int32) (*models.ProcessDetail, error)
+	modules func() (*models.MemoryModulesInfo, error)
 }
 
-func getJSON(t *testing.T, path string, want int) map[string]any {
+func (self *fakeCollector) GetMeta(_ context.Context, modules []string, params gops.MetaParams) (*models.MetaInfo, error) {
+	return self.meta(modules, params)
+}
+
+func (self *fakeCollector) GetProcessesWithOptions(opts gops.ProcessOptions) (*models.ProcessListResponse, error) {
+	return self.procs(opts)
+}
+
+func (self *fakeCollector) GetProcessDetail(pid int32) (*models.ProcessDetail, error) {
+	return self.detail(pid)
+}
+
+func (self *fakeCollector) GetMemoryModules() (*models.MemoryModulesInfo, error) {
+	return self.modules()
+}
+
+func (self *fakeCollector) GetSensors([]string) (*models.SensorsInfo, error) {
+	return &models.SensorsInfo{Sensors: []models.Sensor{}}, nil
+}
+
+func getJSON(t *testing.T, c server.Collector, path string, want int) map[string]any {
 	t.Helper()
-	resp := newAPI(t).Get(path)
+	_, api := humatest.New(t)
+	gops_handler.RegisterHandlers(&server.Server{Gops: c}, huma.NewGroup(api, "/gops"))
+	resp := api.Get(path)
 	require.Equal(t, want, resp.Code, "GET %s: %s", path, resp.Body.String())
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &body))
 	return body
 }
 
-func obj(t *testing.T, v any) map[string]any {
-	t.Helper()
-	m, ok := v.(map[string]any)
-	require.True(t, ok, "want object, got %T", v)
-	return m
-}
-
-func list(v any) []any {
-	l, _ := v.([]any)
-	return l
-}
-
-// rowFor returns the row of the test process in a list of process rows.
-func rowFor(t *testing.T, rows []any) map[string]any {
-	t.Helper()
-	for _, r := range rows {
-		if row := obj(t, r); row["pid"] == float64(os.Getpid()) {
-			return row
-		}
-	}
-	require.FailNow(t, "own pid not in process list")
-	return nil
-}
-
-func TestEndpointsAndErrors(t *testing.T) {
-	assert.Contains(t, getJSON(t, "/gops/sensors", http.StatusOK), "sensors")
-	if _, err := gops.NewGopsUtil().GetMemoryModules(); err != nil {
-		t.Logf("no memory module source on this host, expecting 500: %v", err)
-		getJSON(t, "/gops/memory/modules", http.StatusInternalServerError)
-	} else {
-		assert.Contains(t, getJSON(t, "/gops/memory/modules", http.StatusOK), "modules")
-	}
-	getJSON(t, "/gops/net-rate?all_interfaces=true", http.StatusOK)
-	getJSON(t, "/gops/meta?modules=sensors,gpu,memory-modules&gpu_cursor=not-a-cursor&net_rate_all_interfaces=true", http.StatusOK)
-	getJSON(t, "/gops/meta?modules=processes,bogus", http.StatusBadRequest)
-	getJSON(t, "/gops/process/2147483647", http.StatusNotFound)
-
-	pid := getJSON(t, fmt.Sprintf("/gops/process/%d", os.Getpid()), http.StatusOK)["pid"]
-	assert.Equal(t, float64(os.Getpid()), pid)
-}
-
-func TestProcessJourney(t *testing.T) {
-	if _, err := os.ReadFile("/proc/self/io"); err != nil {
-		t.Skipf("/proc/self/io unreadable: %v", err)
-	}
-	const path = "/gops/meta?modules=processes,process-gpu,process-io&limit=0&disable_proc_cpu=true"
-
-	first := getJSON(t, path, http.StatusOK)
-	cursor, _ := first["cursor"].(string)
-	require.NotEmpty(t, cursor)
-	for _, k := range []string{"diskRead", "diskWrite", "gpu"} {
-		assert.NotNil(t, rowFor(t, list(first["processes"]))[k], "first call lacks %q", k)
-	}
-
-	time.Sleep(100 * time.Millisecond)
-	second := getJSON(t, path+"&proc_cursor="+url.QueryEscape(cursor), http.StatusOK)
-	for _, k := range []string{"diskRead", "diskWrite", "gpu"} {
-		assert.NotNil(t, rowFor(t, list(second["processes"]))[k], "second call lacks %q", k)
-	}
-}
-
-func TestLegacyProcessCursor(t *testing.T) {
-	body := getJSON(t, "/gops/meta?modules=processes&limit=0&proc_cursor="+legacyProcCursor, http.StatusOK)
-	rows := list(body["processes"])
-	require.NotEmpty(t, rows)
-	for _, r := range rows {
-		for _, k := range []string{"diskRead", "diskWrite", "gpu", "vramKB"} {
-			assert.NotContains(t, obj(t, r), k)
-		}
-	}
-	assert.NotNil(t, body["cursor"])
-}
-
-func TestPerformanceRail(t *testing.T) {
-	if b, err := os.ReadFile("/proc/diskstats"); err != nil || len(b) == 0 {
-		t.Skip("/proc/diskstats unavailable")
-	}
-	const mods = "modules=cpu,memory,disk-rate,net-rate,gpu,sensors,memory-modules"
-	cursorOf := func(m map[string]any, key string) string {
-		s, _ := obj(t, m[key])["cursor"].(string)
-		return s
-	}
-
-	first := getJSON(t, "/gops/meta?"+mods, http.StatusOK)
-	assert.Contains(t, obj(t, first["cpu"]), "usage")
-	assert.NotNil(t, obj(t, first["memory"])["total"])
-	assert.Contains(t, obj(t, first["sensors"]), "sensors")
-	disks := list(obj(t, first["diskrate"])["disks"])
-	if len(disks) == 0 {
-		t.Skip("no disks reported by /proc/diskstats")
-	}
-	for _, d := range disks {
-		assert.Nil(t, obj(t, d)["busy"], "busy present without a prior sample")
-	}
-
+func TestMetaPassesModulesAndParams(t *testing.T) {
+	var gotModules []string
+	var gotParams gops.MetaParams
+	c := &fakeCollector{meta: func(modules []string, params gops.MetaParams) (*models.MetaInfo, error) {
+		gotModules, gotParams = modules, params
+		return &models.MetaInfo{Cursor: "next"}, nil
+	}}
 	q := url.Values{}
-	q.Set("cpu_cursor", cursorOf(first, "cpu"))
-	q.Set("disk_rate_cursor", cursorOf(first, "diskrate"))
-	time.Sleep(100 * time.Millisecond)
-	second := getJSON(t, "/gops/meta?"+mods+"&"+q.Encode(), http.StatusOK)
+	q.Set("modules", "processes, process-io")
+	q.Set("proc_cursor", "prev")
+	q.Set("gpu_pci_ids", "10de:2684")
+	q.Set("disable_proc_cpu", "true")
+	q.Set("limit", "5")
+	q.Set("net_rate_all_interfaces", "true")
 
-	assert.Contains(t, obj(t, second["cpu"]), "usage")
-	assert.NotEqual(t, q.Get("cpu_cursor"), cursorOf(second, "cpu"), "cpu cursor did not advance")
-	withBusy := 0
-	for _, d := range list(obj(t, second["diskrate"])["disks"]) {
-		if obj(t, d)["busy"] != nil {
-			withBusy++
+	body := getJSON(t, c, "/gops/meta?"+q.Encode(), http.StatusOK)
+	assert.Equal(t, "next", body["cursor"])
+	assert.Equal(t, []string{"processes", "process-io"}, gotModules, "a comma list is split and trimmed")
+	assert.Equal(t, gops.MetaParams{
+		SortBy: gops.SortByCPU, ProcLimit: 5, MergeChildren: true,
+		GPUPciIds: []string{"10de:2684"}, ProcCursor: "prev", NetRateAllInterfaces: true,
+	}, gotParams)
+}
+
+func TestMetaUnknownModuleIsBadRequest(t *testing.T) {
+	c := &fakeCollector{meta: func([]string, gops.MetaParams) (*models.MetaInfo, error) {
+		return nil, errors.New("unknown module: bogus")
+	}}
+	body := getJSON(t, c, "/gops/meta?modules=processes,bogus", http.StatusBadRequest)
+	assert.Equal(t, "unknown module: bogus", body["detail"])
+}
+
+func TestProcessesPassesOptions(t *testing.T) {
+	var got gops.ProcessOptions
+	c := &fakeCollector{procs: func(opts gops.ProcessOptions) (*models.ProcessListResponse, error) {
+		got = opts
+		return &models.ProcessListResponse{Processes: []*models.ProcessInfo{{PID: 7}}, Cursor: "c2"}, nil
+	}}
+	body := getJSON(t, c, "/gops/processes?gpu=true&io=true&net=true&cursor=c1&disable_proc_cpu=true&limit=3&merge_children=false", http.StatusOK)
+	assert.Equal(t, gops.ProcessOptions{SortBy: gops.SortByCPU, Limit: 3, Cursor: "c1", GPU: true, IO: true, Net: true}, got)
+	assert.Equal(t, "c2", body["cursor"])
+	assert.Len(t, body["data"], 1)
+}
+
+func TestProcessDetailStatuses(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err  error
+		want int
+	}{
+		"found":      {nil, http.StatusOK},
+		"not found":  {fmt.Errorf("process 42: %w", gops.ErrProcessNotFound), http.StatusNotFound},
+		"unreadable": {errors.New("boom"), http.StatusInternalServerError},
+	} {
+		c := &fakeCollector{detail: func(pid int32) (*models.ProcessDetail, error) {
+			if tc.err != nil {
+				return nil, tc.err
+			}
+			return &models.ProcessDetail{PID: pid}, nil
+		}}
+		body := getJSON(t, c, "/gops/process/42", tc.want)
+		if tc.err == nil {
+			assert.Equal(t, float64(42), body["pid"], name)
 		}
 	}
-	assert.Positive(t, withBusy, "no disk row gained busy from the disk_rate_cursor")
+}
+
+func TestMemoryModulesAndSensors(t *testing.T) {
+	c := &fakeCollector{modules: func() (*models.MemoryModulesInfo, error) {
+		return &models.MemoryModulesInfo{Slots: 4, Modules: []models.MemoryModule{}}, nil
+	}}
+	assert.Contains(t, getJSON(t, c, "/gops/memory/modules", http.StatusOK), "modules")
+	assert.Contains(t, getJSON(t, c, "/gops/sensors", http.StatusOK), "sensors")
+
+	c.modules = func() (*models.MemoryModulesInfo, error) { return nil, errors.New("memory modules: no source") }
+	body := getJSON(t, c, "/gops/memory/modules", http.StatusInternalServerError)
+	assert.Equal(t, "Unable to retrieve memory modules", body["detail"])
 }

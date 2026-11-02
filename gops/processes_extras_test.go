@@ -2,82 +2,15 @@ package gops
 
 import (
 	"cmp"
-	"encoding/json"
-	"os"
-	"runtime"
 	"slices"
 	"testing"
-	"time"
 
 	"github.com/duxlabs-dev/dux-gop/models"
-	"github.com/shirou/gopsutil/v4/process"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func ptr[T any](v T) *T { return &v }
-
-func ownProcess(t *testing.T) *process.Process {
-	t.Helper()
-	self, err := process.NewProcess(int32(os.Getpid()))
-	require.NoError(t, err)
-	return self
-}
-
-func TestProcessExtras_RatesFromCursor(t *testing.T) {
-	self := ownProcess(t)
-	read, write, ok := newProcReader().diskBytes(self)
-	if !ok {
-		t.Skip("own process disk counters unreadable on this platform")
-	}
-	created, err := self.CreateTime()
-	require.NoError(t, err)
-	st, ok := newProcReader().stat(self)
-	require.True(t, ok)
-	poll := func(opts ProcessOptions, prev processSample) *models.ProcessInfo {
-		prev.PID = self.Pid
-		opts.Cursor = encodeProcessCursor([]processSample{prev})
-		res, err := newProcessTestUtil(t, self).GetProcessesWithOptions(opts)
-		require.NoError(t, err)
-		return res.Processes[0]
-	}
-	base := models.ProcessCursorData{Timestamp: created}
-
-	// No previous counters means unknown, never 0; the baseline pass still rates on the first call.
-	row := poll(ProcessOptions{IO: true}, processSample{ProcessCursorData: models.ProcessCursorData{Timestamp: time.Now().UnixMilli() - 10_000}})
-	assert.Nil(t, row.DiskRead)
-	assert.Nil(t, row.DiskWrite)
-
-	row = poll(ProcessOptions{IO: true}, processSample{ProcessCursorData: base, ioOK: true, io: [2]uint64{read, write}})
-	assert.NotNil(t, row.DiskRead)
-	assert.NotNil(t, row.DiskWrite)
-
-	res, err := newProcessTestUtil(t, self).GetProcessesWithOptions(ProcessOptions{IO: true})
-	require.NoError(t, err)
-	assert.NotNil(t, res.Processes[0].DiskRead, "extras get first-response rates with process CPU off")
-
-	// A previous sample from another process with the same PID is ignored.
-	stale := processSample{
-		ProcessCursorData: models.ProcessCursorData{Ticks: st.CPUTime - 1, Timestamp: time.Now().UnixMilli() - 10},
-		start:             st.Start + 1, ioOK: true,
-	}
-	row = poll(ProcessOptions{EnableCPU: true, IO: true}, stale)
-	assert.Nil(t, row.DiskRead)
-	assert.Zero(t, row.CPU)
-	stale.start = st.Start
-	row = poll(ProcessOptions{EnableCPU: true, IO: true}, stale)
-	assert.NotNil(t, row.DiskRead)
-	assert.Positive(t, row.CPU)
-
-	if runtime.GOOS == "linux" {
-		row = poll(ProcessOptions{GPU: true}, processSample{ProcessCursorData: base, gpuOK: true})
-		assert.NotNil(t, row.GPU)
-		assert.NotNil(t, row.VRAMKB)
-		row = poll(ProcessOptions{GPU: true}, processSample{ProcessCursorData: base})
-		assert.Nil(t, row.GPU, "no previous GPU sample means unknown")
-		assert.NotNil(t, row.VRAMKB, "VRAM needs no previous sample")
-	}
-}
 
 func TestProcessCursor_Extras(t *testing.T) {
 	clients := []gpuCursorClient{{PDev: "0000:0c:00.0", ID: 7, Engines: map[string][3]uint64{"gfx": {123, 0, 0}}}}
@@ -106,24 +39,6 @@ func TestProcessCursor_Extras(t *testing.T) {
 		assert.False(t, procs[1].ioOK || procs[1].gpuOK, name)
 		assert.Zero(t, n.at, name)
 	}
-}
-
-func TestProcessCursor_LegacyStillRatesCPU(t *testing.T) {
-	self := ownProcess(t)
-	times, err := self.Times()
-	require.NoError(t, err)
-	legacy, err := json.Marshal(map[string]any{
-		"t": time.Now().UnixMilli() - 10_000, "pid": []int32{self.Pid},
-		"cpu": []int64{int64((times.User + times.System - 5) * 1000)}, "dt": []int64{0},
-	})
-	require.NoError(t, err)
-
-	res, err := newProcessTestUtil(t, self).GetProcessesWithOptions(ProcessOptions{EnableCPU: true, IO: true, GPU: true, Cursor: gzipB64(t, string(legacy))})
-	require.NoError(t, err)
-	expected := 50.0 / float64(runtime.NumCPU())
-	assert.InDelta(t, expected, res.Processes[0].CPU, expected/10)
-	assert.Nil(t, res.Processes[0].DiskRead, "a legacy cursor has no IO baseline")
-	assert.Nil(t, res.Processes[0].GPU, "a legacy cursor has no GPU baseline")
 }
 
 func TestMergeProcesses_Extras(t *testing.T) {

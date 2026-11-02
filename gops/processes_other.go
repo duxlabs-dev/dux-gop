@@ -4,7 +4,7 @@ package gops
 
 import "github.com/shirou/gopsutil/v4/process"
 
-func getPssDirty(_ int32) (uint64, error) {
+func getPssDirty(_ string, _ int32) (uint64, error) {
 	return 0, nil
 }
 
@@ -48,7 +48,7 @@ func listProcesses() ([]*process.Process, error) {
 
 type procReader struct{}
 
-func newProcReader() *procReader { return &procReader{} }
+func newProcReader(_ string) *procReader { return &procReader{} }
 
 func (*procReader) stat(p *process.Process) (procStat, bool) { return readProcStat(p) }
 

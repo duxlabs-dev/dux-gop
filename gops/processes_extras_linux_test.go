@@ -3,19 +3,15 @@
 package gops
 
 import (
-	"fmt"
-	"net"
+	"encoding/json"
 	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
-	"github.com/duxlabs-dev/dux-gop/gops/mocks"
 	"github.com/duxlabs-dev/dux-gop/models"
-	"github.com/shirou/gopsutil/v4/mem"
 	"github.com/shirou/gopsutil/v4/process"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -46,16 +42,13 @@ func TestSetProcessExtras_GPUFromCursorClients(t *testing.T) {
 }
 
 func TestProcessExtras_FirstPollNetRateFromBaselineDump(t *testing.T) {
-	c, _ := loopbackConn(t)
-	inode := socketInode(t, c.(*net.TCPConn))
-
-	self := ownProcess(t)
-	g := newProcessTestUtil(t, self)
+	f := newFakeProc(t)
+	g := procTestUtil(t, f, f.add(fakeProcess{pid: 100, fds: map[string]string{"3": "socket:[777]"}}))
 	var calls uint64
 	g.sockDump = func() ([]sockDiagEntry, error) {
 		calls++
 		return []sockDiagEntry{{
-			Inode: inode, Protocol: 6, Remote: netip.MustParseAddrPort("8.8.8.8:443"),
+			Inode: 777, Protocol: 6, Remote: netip.MustParseAddrPort("8.8.8.8:443"),
 			RxBytes: calls * 1_000_000, TxBytes: calls * 1_000_000, HasTCPInfo: true,
 		}}, nil
 	}
@@ -71,6 +64,70 @@ func TestProcessExtras_FirstPollNetRateFromBaselineDump(t *testing.T) {
 	assert.Equal(t, 1, *row.Connections)
 }
 
+func TestProcessExtras_RatesFromCursor(t *testing.T) {
+	f := newFakeProc(t)
+	g := procTestUtil(t, f, f.add(fakeProcess{pid: 100, cpuTicks: 1000, start: 500, readBytes: 4096, writeBytes: 8192}))
+	now := time.Now().UnixMilli()
+	poll := func(opts ProcessOptions, prev processSample) *models.ProcessInfo {
+		prev.PID = 100
+		opts.Cursor = encodeProcessCursor([]processSample{prev})
+		res, err := g.GetProcessesWithOptions(opts)
+		require.NoError(t, err)
+		require.Len(t, res.Processes, 1)
+		return res.Processes[0]
+	}
+	base := models.ProcessCursorData{Timestamp: now - 10_000}
+
+	// No previous counters means unknown, never 0; the baseline pass still rates on the first call.
+	row := poll(ProcessOptions{IO: true}, processSample{ProcessCursorData: base})
+	assert.Nil(t, row.DiskRead)
+	assert.Nil(t, row.DiskWrite)
+
+	row = poll(ProcessOptions{IO: true}, processSample{ProcessCursorData: base, ioOK: true, io: [2]uint64{4096, 8192}})
+	assert.NotNil(t, row.DiskRead)
+	assert.NotNil(t, row.DiskWrite)
+
+	res, err := g.GetProcessesWithOptions(ProcessOptions{IO: true})
+	require.NoError(t, err)
+	assert.NotNil(t, res.Processes[0].DiskRead, "extras get first-response rates with process CPU off")
+
+	// A previous sample from another process with the same PID is ignored.
+	stale := processSample{
+		ProcessCursorData: models.ProcessCursorData{Ticks: 9, Timestamp: now - 10},
+		start:             501, ioOK: true,
+	}
+	row = poll(ProcessOptions{EnableCPU: true, IO: true}, stale)
+	assert.Nil(t, row.DiskRead)
+	assert.Zero(t, row.CPU)
+	stale.start = 500
+	row = poll(ProcessOptions{EnableCPU: true, IO: true}, stale)
+	assert.NotNil(t, row.DiskRead)
+	assert.Positive(t, row.CPU)
+
+	row = poll(ProcessOptions{GPU: true}, processSample{ProcessCursorData: base, gpuOK: true})
+	assert.NotNil(t, row.GPU)
+	assert.NotNil(t, row.VRAMKB)
+	row = poll(ProcessOptions{GPU: true}, processSample{ProcessCursorData: base})
+	assert.Nil(t, row.GPU, "no previous GPU sample means unknown")
+	assert.NotNil(t, row.VRAMKB, "VRAM needs no previous sample")
+}
+
+func TestProcessCursor_LegacyStillRatesCPU(t *testing.T) {
+	f := newFakeProc(t)
+	g := procTestUtil(t, f, f.add(fakeProcess{pid: 100, cpuTicks: 1000}))
+	legacy, err := json.Marshal(map[string]any{
+		"t": time.Now().UnixMilli() - 10_000, "pid": []int32{100},
+		"cpu": []int64{(10 - 5) * 1000}, "dt": []int64{0},
+	})
+	require.NoError(t, err)
+
+	res, err := g.GetProcessesWithOptions(ProcessOptions{EnableCPU: true, IO: true, GPU: true, Cursor: gzipB64(t, string(legacy))})
+	require.NoError(t, err)
+	assert.InDelta(t, 12.5, res.Processes[0].CPU, 1.25)
+	assert.Nil(t, res.Processes[0].DiskRead, "a legacy cursor has no IO baseline")
+	assert.Nil(t, res.Processes[0].GPU, "a legacy cursor has no GPU baseline")
+}
+
 func TestParseProcStat(t *testing.T) {
 	st, ok := parseProcStat("1234 (Web Content (x)) S 1 1234 1234 34817 -1 4194560 100 0 0 0 5 3 0 0 20 5 27 0 100 0 0\n")
 	require.True(t, ok)
@@ -84,15 +141,6 @@ func TestParseProcStat(t *testing.T) {
 	assert.False(t, ok, "starttime missing")
 	_, ok = parseProcStat("")
 	assert.False(t, ok)
-}
-
-func writeProcFixture(t *testing.T, root string, pid int, files map[string]string) {
-	t.Helper()
-	dir := filepath.Join(root, itoa(pid))
-	require.NoError(t, os.MkdirAll(dir, 0o755))
-	for name, content := range files {
-		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644))
-	}
 }
 
 func TestProcReader_Basics(t *testing.T) {
@@ -133,44 +181,17 @@ func TestProcReader_Basics(t *testing.T) {
 	assert.False(t, ok)
 }
 
-// netTestUtil serves procs on every call, so one GopsUtil (and its tails)
-// can be polled more than once.
-func netTestUtil(t *testing.T, dump func() ([]sockDiagEntry, error), procs ...*process.Process) *GopsUtil {
-	t.Helper()
-	mockProc := mocks.NewMockProcessInfoProvider(t)
-	mockProc.EXPECT().Processes().Return(procs, nil)
-	mockMem := mocks.NewMockMemoryInfoProvider(t)
-	mockMem.EXPECT().VirtualMemory().Return(&mem.VirtualMemoryStat{Total: 16 << 30}, nil)
-	g := NewGopsUtilWithProviders(nil, mockMem, nil, nil, mockProc, nil, nil, nil)
-	g.sockDump = dump
-	t.Cleanup(g.Close)
-	return g
-}
-
-func loopbackConn(t *testing.T) (client, server net.Conn) {
-	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	defer ln.Close()
-	client, err = net.Dial("tcp", ln.Addr().String())
-	require.NoError(t, err)
-	server, err = ln.Accept()
-	require.NoError(t, err)
-	t.Cleanup(func() { client.Close(); server.Close() })
-	return client, server
-}
-
 func TestProcessExtras_NetTailCreditedToPreviousHolder(t *testing.T) {
-	c, _ := loopbackConn(t)
-	inode := socketInode(t, c.(*net.TCPConn))
+	f := newFakeProc(t)
+	g := procTestUtil(t, f, f.add(fakeProcess{pid: 100, fds: map[string]string{"3": "socket:[777]"}}))
 	remote := netip.MustParseAddrPort("8.8.8.8:443")
 	open := true
-	g := netTestUtil(t, func() ([]sockDiagEntry, error) {
+	g.sockDump = func() ([]sockDiagEntry, error) {
 		if !open {
 			return nil, nil
 		}
-		return []sockDiagEntry{{Inode: inode, Cookie: 77, Protocol: 6, Remote: remote, RxBytes: 1000, TxBytes: 1000, HasTCPInfo: true}}, nil
-	}, ownProcess(t))
+		return []sockDiagEntry{{Inode: 777, Cookie: 77, Protocol: 6, Remote: remote, RxBytes: 1000, TxBytes: 1000, HasTCPInfo: true}}, nil
+	}
 	var emit func(sockDiagEntry)
 	g.sockDestroys = func(e func(sockDiagEntry)) (func(), error) { emit = e; return func() {}, nil }
 
@@ -189,18 +210,4 @@ func TestProcessExtras_NetTailCreditedToPreviousHolder(t *testing.T) {
 	require.NotNil(t, row.NetRx)
 	assert.Positive(t, *row.NetRx, "the bytes after the last dump count for the process that held the socket")
 	assert.InDelta(t, 2.0, *row.NetRx / *row.NetTx, 1e-9)
-}
-
-func socketInode(t *testing.T, c syscall.Conn) uint32 {
-	raw, err := c.SyscallConn()
-	require.NoError(t, err)
-	var target string
-	require.NoError(t, raw.Control(func(fd uintptr) {
-		target, err = os.Readlink(fmt.Sprintf("/proc/self/fd/%d", fd))
-	}))
-	require.NoError(t, err)
-	var inode uint32
-	_, err = fmt.Sscanf(target, "socket:[%d]", &inode)
-	require.NoError(t, err)
-	return inode
 }

@@ -19,9 +19,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func getPssDirty(pid int32) (uint64, error) {
-	smapsRollupPath := fmt.Sprintf("/proc/%d/smaps_rollup", pid)
-	contents, err := os.ReadFile(smapsRollupPath)
+func getPssDirty(root string, pid int32) (uint64, error) {
+	contents, err := os.ReadFile(filepath.Join(root, strconv.Itoa(int(pid)), "smaps_rollup"))
 	if err != nil {
 		return 0, err
 	}
@@ -59,8 +58,8 @@ type procReader struct {
 	buf  []byte
 }
 
-func newProcReader() *procReader {
-	return &procReader{root: "/proc", buf: make([]byte, 4096)}
+func newProcReader(root string) *procReader {
+	return &procReader{root: root, buf: make([]byte, 4096)}
 }
 
 func (self *procReader) path(pid int32, name string) string {

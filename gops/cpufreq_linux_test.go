@@ -9,7 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/duxlabs-dev/dux-gop/gops/mocks"
 	"github.com/duxlabs-dev/dux-gop/models"
+	"github.com/shirou/gopsutil/v4/cpu"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -77,19 +79,28 @@ func TestGetCPUInfoDoesNotShareCache(t *testing.T) {
 	cpuTracker.mu.Lock()
 	cpuTracker.dynamic.coreMHz = []float64{1000}
 	cpuTracker.static.cache = &models.CPUCache{L1d: 1}
-	cpuTracker.modelCached, cpuTracker.freqLastRead = true, time.Now()
+	cpuTracker.modelCached = true
+	cpuTracker.freqLastRead, cpuTracker.tempLastRead = time.Now(), time.Now()
 	cpuTracker.mu.Unlock()
 	t.Cleanup(func() {
 		cpuTracker.mu.Lock()
-		cpuTracker.modelCached, cpuTracker.freqLastRead = false, time.Time{}
+		cpuTracker.modelCached = false
+		cpuTracker.freqLastRead, cpuTracker.tempLastRead = time.Time{}, time.Time{}
 		cpuTracker.mu.Unlock()
 	})
 
-	info, err := NewGopsUtil().GetCPUInfo()
+	cpuMock := mocks.NewMockCPUInfoProvider(t)
+	cpuMock.EXPECT().Times(false).Return([]cpu.TimesStat{{User: 100, Idle: 900}}, nil)
+	cpuMock.EXPECT().Times(true).Return([]cpu.TimesStat{{User: 100, Idle: 900}}, nil)
+	cpuMock.EXPECT().Percent(100*time.Millisecond, false).Return([]float64{10}, nil)
+	cpuMock.EXPECT().Percent(100*time.Millisecond, true).Return([]float64{10}, nil)
+	g := NewGopsUtilWithProviders(cpuMock, nil, nil, nil, nil, nil, nil, nil)
+
+	info, err := g.GetCPUInfo()
 	require.NoError(t, err)
 	info.CoreFrequencies[0], info.Cache.L1d = 0, 0
 
-	info, err = NewGopsUtil().GetCPUInfo()
+	info, err = g.GetCPUInfo()
 	require.NoError(t, err)
 	assert.Equal(t, []float64{1000}, info.CoreFrequencies)
 	assert.Equal(t, uint64(1), info.Cache.L1d)

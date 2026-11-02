@@ -12,6 +12,7 @@ import (
 	"github.com/duxlabs-dev/dux-gop/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 )
 
 const amdgpuIdleFdinfo = `drm-driver:	amdgpu
@@ -139,17 +140,17 @@ func TestScanProcFDs(t *testing.T) {
 	}
 	require.NoError(t, os.Symlink("/dev/dri/card1", filepath.Join(fdDir, "6")))
 
-	scan, err := scanProcFDs(root, 42, map[string]gpuNodeState{"renderD128": gpuNodeRead, "card1": gpuNodeRead}, false)
+	scan, err := scanProcFDs(root, 42, gpuNodeSet{nodes: map[string]gpuNodeState{"renderD128": gpuNodeRead, "card1": gpuNodeRead}}, false)
 	require.NoError(t, err)
 	require.Len(t, scan.DRM, 1, "Duplicated fds of one client count once; the socket and the fd without fdinfo are skipped")
 	assert.Equal(t, uint64(49), scan.DRM[drmClientKey{PDev: "0000:0c:00.0", ID: 49}].ID)
 
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "43"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(root, "43", "fd"), nil, 0o644))
-	_, err = scanProcFDs(root, 43, nil, false)
+	_, err = scanProcFDs(root, 43, gpuNodeSet{}, false)
 	assert.Error(t, err, "An unreadable fd dir is an error, not an empty result")
 
-	_, err = scanProcFDs(root, 44, nil, false)
+	_, err = scanProcFDs(root, 44, gpuNodeSet{}, false)
 	assert.Error(t, err)
 
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "self"), 0o755))
@@ -172,7 +173,7 @@ func TestScanProcFDsSkipsUnwantedNodes(t *testing.T) {
 
 	done := make(chan procFDScan, 1)
 	go func() {
-		scan, _ := scanProcFDs(root, 42, map[string]gpuNodeState{"renderD128": gpuNodeRead}, false)
+		scan, _ := scanProcFDs(root, 42, gpuNodeSet{nodes: map[string]gpuNodeState{"renderD128": gpuNodeRead}}, false)
 		done <- scan
 	}()
 	select {
@@ -209,6 +210,13 @@ func TestGPUNodes(t *testing.T) {
 		"renderD130": gpuNodeExcluded,
 		"renderD131": gpuNodeRead,
 	}, set.nodes)
+	assert.Equal(t, map[uint64]gpuNodeState{
+		unix.Mkdev(226, 1):   gpuNodeRead,
+		unix.Mkdev(226, 128): gpuNodeRead,
+		unix.Mkdev(226, 129): gpuNodeSuspended,
+		unix.Mkdev(226, 130): gpuNodeExcluded,
+		unix.Mkdev(226, 131): gpuNodeRead,
+	}, set.devs)
 	assert.Equal(t, []string{"0000:01:00.0"}, set.nvidia)
 
 	assert.Empty(t, gpuNodes(pciRoot, gpus, []string{"1002:744c"}).nvidia, "an excluded NVIDIA GPU is not monitored")

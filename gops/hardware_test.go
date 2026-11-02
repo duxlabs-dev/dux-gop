@@ -155,11 +155,6 @@ func TestBuildFullName(t *testing.T) {
 	}
 }
 
-func TestGetDistroName(t *testing.T) {
-	result := getDistroName()
-	assert.NotEmpty(t, result)
-}
-
 func BenchmarkRemoveVendorPrefixes(b *testing.B) {
 	testString := "NVIDIA Corporation GeForce RTX 3080"
 	b.ResetTimer()

@@ -1,6 +1,7 @@
 package gops
 
 import (
+	"runtime"
 	"time"
 
 	"github.com/duxlabs-dev/dux-go/log"
@@ -19,7 +20,9 @@ type GopsUtil struct {
 	loadProvider LoadInfoProvider
 	fs           FileSystem
 
-	pss pssCache
+	procRoot string
+	numCPU   int
+	pss      pssCache
 
 	detectGPUEntries func() ([]gpuEntry, error)
 	sampleGPUs       func([]gpuEntry, gpuCursor, time.Time) ([]gpuSample, gpuCursor)
@@ -65,6 +68,9 @@ func NewGopsUtilWithProviders(
 func withDefaultSources(g *GopsUtil) *GopsUtil {
 	// The system module reads boot time on every call; it never changes.
 	host.EnableBootTimeCache(true)
+	g.procRoot = "/proc"
+	g.numCPU = runtime.NumCPU()
+	g.pss.read = func(pid int32) (uint64, error) { return getPssDirty(g.procRoot, pid) }
 	g.detectGPUEntries = detectGPUEntries
 	g.sampleGPUs = g.defaultGPUSampler()
 	g.platformSources = defaultPlatformSources()

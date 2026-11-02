@@ -15,6 +15,7 @@ type platformSources struct {
 	tails        sockTails
 	slowChipRead func(dir string) []hwmonReading
 	slowChipWait time.Duration
+	netNS        func() string
 
 	memModules struct {
 		sync.Mutex
@@ -25,7 +26,7 @@ type platformSources struct {
 }
 
 func defaultPlatformSources() platformSources {
-	return platformSources{sockDump: dumpSockets, sockDestroys: listenSockDestroys, slowChipRead: readHwmonReadings, slowChipWait: 100 * time.Millisecond}
+	return platformSources{sockDump: dumpSockets, sockDestroys: listenSockDestroys, slowChipRead: readHwmonReadings, slowChipWait: 100 * time.Millisecond, netNS: ownNetNS}
 }
 
 func (self *GopsUtil) closePlatform() { self.tails.close() }

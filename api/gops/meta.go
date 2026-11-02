@@ -37,16 +37,11 @@ type ModulesResponse struct {
 
 // GET /meta
 func (self *HandlerGroup) Meta(ctx context.Context, input *MetaInput) (*MetaResponse, error) {
-	// Parse modules if it's a single comma-separated string
 	var modules []string
-	if len(input.Modules) == 1 && strings.Contains(input.Modules[0], ",") {
-		modules = strings.Split(input.Modules[0], ",")
-		// Trim whitespace
-		for i, module := range modules {
-			modules[i] = strings.TrimSpace(module)
+	for _, m := range input.Modules {
+		for _, part := range strings.Split(m, ",") {
+			modules = append(modules, strings.TrimSpace(part))
 		}
-	} else {
-		modules = input.Modules
 	}
 
 	params := gops.MetaParams{

@@ -226,11 +226,7 @@ func (self *pssCache) get(pid int32, start, rssKB uint64, now time.Time) (uint64
 	if ok && e.start == start && now.Sub(e.at) < pssMaxAge && max(rssKB, e.rssKB)-min(rssKB, e.rssKB) <= e.rssKB/20 {
 		return e.pssKB, nil
 	}
-	read := self.read
-	if read == nil {
-		read = getPssDirty
-	}
-	pss, err := read(pid)
+	pss, err := self.read(pid)
 	if err != nil {
 		return 0, err
 	}
@@ -327,9 +323,10 @@ func (self ProcessOptions) effectiveSort() ProcSortBy {
 }
 
 type processExtras struct {
-	gpu *procGPUReader
-	net *procNetReader
-	io  bool
+	gpu      *procGPUReader
+	net      *procNetReader
+	io       bool
+	procRoot string
 }
 
 // sample recovers because the baseline pass calls it on the request goroutine.
@@ -345,7 +342,7 @@ func (self processExtras) sample(r *procReader, p *process.Process, s *processSa
 		read, write, s.ioOK = r.diskBytes(p)
 		s.io = [2]uint64{read, write}
 	}
-	g, n = self.readFDs("/proc", p.Pid)
+	g, n = self.readFDs(self.procRoot, p.Pid)
 	if g.Readable && g.UsageKnown {
 		s.gpuOK, s.gpu = true, cursorClients(g.Clients)
 	}
@@ -363,7 +360,7 @@ func (self *GopsUtil) GetProcessesWithOptions(opts ProcessOptions) (*models.Proc
 
 	cursorMap, prevNet := decodeCursor(opts.Cursor)
 
-	extras := processExtras{io: opts.IO}
+	extras := processExtras{io: opts.IO, procRoot: self.procRoot}
 	if opts.GPU {
 		extras.gpu = self.newProcGPUReader(opts.GPUPciIds)
 	}
@@ -374,7 +371,7 @@ func (self *GopsUtil) GetProcessesWithOptions(opts ProcessOptions) (*models.Proc
 	refreshUsernames()
 
 	if (enableCPU || opts.GPU || opts.IO || opts.Net) && len(cursorMap) == 0 {
-		r := newProcReader()
+		r := newProcReader(self.procRoot)
 		var netRows []netRow
 		for _, p := range procs {
 			st, ok := r.stat(p)
@@ -407,19 +404,19 @@ func (self *GopsUtil) GetProcessesWithOptions(opts ProcessOptions) (*models.Proc
 		prevOK  bool
 	}
 
-	numCPU := float64(runtime.NumCPU())
+	numCPU := float64(self.numCPU)
 	now := time.Now()
 
 	// /proc reads contend in the kernel: past 4 workers CPU time grows
 	// faster than wall time shrinks.
-	numWorkers := min(runtime.NumCPU(), 4)
+	numWorkers := min(self.numCPU, 4)
 
 	jobs := make(chan int, len(procs))
 	results := make(chan procResult, len(procs))
 
 	for w := 0; w < numWorkers; w++ {
 		go func() {
-			r := newProcReader()
+			r := newProcReader(self.procRoot)
 			for idx := range jobs {
 				p := procs[idx]
 

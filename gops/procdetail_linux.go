@@ -11,6 +11,7 @@ import (
 	"net/netip"
 	"os"
 	"os/user"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -23,14 +24,14 @@ import (
 // GetProcessDetail reads the on-demand fields of one process. Fields that are
 // unreadable (another user's process, an exited PID) stay unset.
 func (self *GopsUtil) GetProcessDetail(pid int32) (*models.ProcessDetail, error) {
-	dir := fmt.Sprintf("/proc/%d", pid)
+	dir := filepath.Join(self.procRoot, strconv.Itoa(int(pid)))
 	if _, err := os.Stat(dir); errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("process %d: %w", pid, ErrProcessNotFound)
 	} else if err != nil {
 		return nil, err
 	}
 	d := &models.ProcessDetail{PID: pid}
-	if read, write, ok := newProcReader().diskBytes(&process.Process{Pid: pid}); ok {
+	if read, write, ok := newProcReader(self.procRoot).diskBytes(&process.Process{Pid: pid}); ok {
 		d.ReadTotal, d.WriteTotal = &read, &write
 	}
 	if data, err := os.ReadFile(dir + "/status"); err == nil {
@@ -63,7 +64,7 @@ func (self *GopsUtil) GetProcessDetail(pid int32) (*models.ProcessDetail, error)
 	if cwd, err := os.Readlink(dir + "/cwd"); err == nil {
 		d.Cwd = cwd
 	}
-	if scan, err := scanProcFDs("/proc", pid, nil, true); err == nil {
+	if scan, err := scanProcFDs(self.procRoot, pid, gpuNodeSet{}, true); err == nil {
 		d.Listening = listeningSockets(dir+"/net", scan.SocketInodes)
 	}
 	d.Sandbox = detectSandbox(dir)
