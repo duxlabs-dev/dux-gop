@@ -329,3 +329,34 @@ func TestSampleNvidiaRetriesWithoutVideoFields(t *testing.T) {
 	assert.Len(t, calls, 3, "the rejection is remembered")
 	assert.Len(t, calls[2], len(nvidiaSmiFields))
 }
+
+func TestSamplePassthroughGPUReadsNothing(t *testing.T) {
+	s := testSampler(t, nil)
+	writeSysfs(t, s.pciDevices, map[string]string{
+		"0000:03:00.0/current_link_speed":   "16.0 GT/s PCIe",
+		"0000:03:00.0/power/runtime_status": "active",
+	})
+	writeSysfs(t, s.thermal, map[string]string{
+		"thermal_zone0/type": "acpitz",
+		"thermal_zone0/temp": "45000",
+	})
+
+	samples, _ := s.sample([]gpuEntry{{Driver: "vfio-pci", BusId: "0000:03:00.0"}}, gpuCursor{}, time.Now())
+
+	assert.Equal(t, models.GPUStatePassthrough, samples[0].State)
+	assert.Nil(t, samples[0].Usage)
+	assert.Zero(t, samples[0].Temperature)
+	assert.Empty(t, samples[0].PcieLinkSpeed)
+}
+
+func TestSampleFollowsLiveDriverBinding(t *testing.T) {
+	s := testSampler(t, nil)
+	writeSysfs(t, s.pciDevices, map[string]string{"0000:03:00.0/gpu_busy_percent": "80"})
+	require.NoError(t, os.Symlink("../../../bus/pci/drivers/vfio-pci", filepath.Join(s.pciDevices, "0000:03:00.0", "driver")))
+
+	samples, _ := s.sample([]gpuEntry{{Driver: "amdgpu", BusId: "0000:03:00.0"}}, gpuCursor{}, time.Now())
+
+	assert.Equal(t, "vfio-pci", samples[0].Driver)
+	assert.Equal(t, models.GPUStatePassthrough, samples[0].State)
+	assert.Nil(t, samples[0].Usage)
+}

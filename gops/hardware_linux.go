@@ -196,11 +196,7 @@ func lookupPCIDevice(vendorId, deviceId string) string {
 }
 
 func getGPUDriver(bdf string) string {
-	driverPath := filepath.Join(pciDevicesRoot, bdf, "driver")
-	if link, err := os.Readlink(driverPath); err == nil {
-		return filepath.Base(link)
-	}
-	return ""
+	return boundDriver(filepath.Join(pciDevicesRoot, bdf), "")
 }
 
 func getMaxACPITZTemperatureForGPU(thermalPath string, thermalEntries []os.DirEntry, minTemp, maxTemp float64) float64 {

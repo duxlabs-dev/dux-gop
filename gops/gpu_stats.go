@@ -1,6 +1,7 @@
 package gops
 
 import (
+	"cmp"
 	"encoding/base64"
 	"encoding/json"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 type gpuSample struct {
 	State       string
+	Driver      string
 	Temperature float64
 	Hwmon       string
 	Usage       *float64
@@ -41,6 +43,7 @@ type gpuSample struct {
 
 func (s gpuSample) applyTo(gpu *models.GPU) {
 	gpu.State = s.State
+	gpu.Driver = cmp.Or(s.Driver, gpu.Driver)
 	gpu.Temperature = s.Temperature
 	gpu.Hwmon = s.Hwmon
 	gpu.Usage = s.Usage

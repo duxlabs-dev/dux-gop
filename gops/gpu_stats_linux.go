@@ -52,6 +52,8 @@ var nvidiaSmiNoVideo atomic.Bool
 
 var nvidiaSmiInvalidField = []byte("is not a valid field")
 
+var passthroughDrivers = map[string]bool{"vfio-pci": true, "pci-stub": true}
+
 var pcieGenSpeeds = map[int]string{
 	1: "2.5 GT/s PCIe",
 	2: "5.0 GT/s PCIe",
@@ -86,6 +88,15 @@ func (s gpuSampler) sample(entries []gpuEntry, prev gpuCursor, now time.Time) ([
 		sample := &samples[i]
 		sample.Hwmon = "unknown"
 		dev := filepath.Join(s.pciDevices, entry.BusId)
+		// VM hook scripts rebind a card between its host driver and vfio-pci while
+		// dgop runs, so the scan-time driver can be stale.
+		driver := boundDriver(dev, entry.Driver)
+		sample.Driver = driver
+
+		if passthroughDrivers[driver] {
+			sample.State = models.GPUStatePassthrough
+			continue
+		}
 
 		// Most driver queries resume a runtime-suspended card, and a sleeping GPU
 		// is idle by definition.
@@ -96,19 +107,19 @@ func (s gpuSampler) sample(entries []gpuEntry, prev gpuCursor, now time.Time) ([
 		}
 		sample.State = models.GPUStateActive
 
-		switch entry.Driver {
+		switch driver {
 		case "nvidia":
 			nvidia = append(nvidia, i)
 			continue
 		case "amdgpu":
 			readAMDGPU(dev, sample)
 		case "i915", "xe":
-			readIntelGPU(dev, entry.Driver, entry.BusId, sample, prev, next)
+			readIntelGPU(dev, driver, entry.BusId, sample, prev, next)
 		}
 
 		s.readGPUHwmon(dev, entry.BusId, sample, prev, next)
 		readPCIeLink(dev, sample)
-		if entry.Driver == "amdgpu" {
+		if driver == "amdgpu" {
 			readAMDGPUClocks(dev, sample)
 			readAMDGPUPCIe(dev, sample)
 		}
@@ -220,6 +231,14 @@ func firstSet[T any](values ...*T) *T {
 		}
 	}
 	return nil
+}
+
+func boundDriver(dev, fallback string) string {
+	link, err := os.Readlink(filepath.Join(dev, "driver"))
+	if err != nil {
+		return fallback
+	}
+	return filepath.Base(link)
 }
 
 func isRuntimeSuspended(dev string) bool {

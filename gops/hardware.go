@@ -1,6 +1,7 @@
 package gops
 
 import (
+	"cmp"
 	"fmt"
 	"os"
 	"regexp"
@@ -102,7 +103,7 @@ func (self *GopsUtil) GetGPUTemp(pciId string) (*models.GPUTempInfo, error) {
 		}
 		samples, _ := self.sampleGPUs(entries[i:i+1], gpuCursor{}, time.Now())
 		return &models.GPUTempInfo{
-			Driver:      entries[i].Driver,
+			Driver:      cmp.Or(samples[0].Driver, entries[i].Driver),
 			Hwmon:       samples[0].Hwmon,
 			Temperature: samples[0].Temperature,
 		}, nil

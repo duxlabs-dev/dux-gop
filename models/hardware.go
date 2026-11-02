@@ -35,7 +35,7 @@ type GPU struct {
 
 	// Live metrics are only filled for requested GPUs; nil means the driver does
 	// not expose the value. Units: percent, KB, watts, MHz.
-	State       string   `json:"state,omitempty"`
+	State       string   `json:"state,omitempty" doc:"active, suspended, or passthrough (bound to vfio-pci for a VM, nothing to read)"`
 	Usage       *float64 `json:"usage,omitempty"`
 	MemoryUsed  *uint64  `json:"memoryUsed,omitempty"`
 	MemoryTotal *uint64  `json:"memoryTotal,omitempty"`
@@ -63,8 +63,9 @@ type GPU struct {
 }
 
 const (
-	GPUStateActive    = "active"
-	GPUStateSuspended = "suspended"
+	GPUStateActive      = "active"
+	GPUStateSuspended   = "suspended"
+	GPUStatePassthrough = "passthrough"
 )
 
 type GPUInfo struct {
