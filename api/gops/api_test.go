@@ -61,8 +61,12 @@ func rowFor(t *testing.T, rows []any) map[string]any {
 }
 
 func TestEndpointsAndErrors(t *testing.T) {
-	for path, key := range map[string]string{"/gops/sensors": "sensors", "/gops/memory/modules": "modules"} {
-		assert.Contains(t, getJSON(t, path, http.StatusOK), key, path)
+	assert.Contains(t, getJSON(t, "/gops/sensors", http.StatusOK), "sensors")
+	if _, err := gops.NewGopsUtil().GetMemoryModules(); err != nil {
+		t.Logf("no memory module source on this host, expecting 500: %v", err)
+		getJSON(t, "/gops/memory/modules", http.StatusInternalServerError)
+	} else {
+		assert.Contains(t, getJSON(t, "/gops/memory/modules", http.StatusOK), "modules")
 	}
 	getJSON(t, "/gops/net-rate?all_interfaces=true", http.StatusOK)
 	getJSON(t, "/gops/meta?modules=sensors,gpu,memory-modules&gpu_cursor=not-a-cursor&net_rate_all_interfaces=true", http.StatusOK)

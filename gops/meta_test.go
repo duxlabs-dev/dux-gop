@@ -88,12 +88,14 @@ func TestGetMetaTogglingModifiersKeepsCPURates(t *testing.T) {
 	g := NewGopsUtil()
 	ctx := context.Background()
 	own := int32(os.Getpid())
-	// Moving the own baseline back one CPU second makes every rate positive.
+	// Moving the own baseline back one CPU second and one wall second makes
+	// every rate positive, even when two calls land in the same millisecond.
 	rewind := func(cursor string) string {
 		var entries []processSample
 		for _, e := range decodeProcessCursor(cursor) {
 			if e.PID == own {
 				e.Ticks--
+				e.Timestamp -= 1000
 			}
 			entries = append(entries, *e)
 		}
