@@ -1,0 +1,41 @@
+name: Notify packaging
+
+# Asks duxlabs-dev/dux-repo to check stable packages once this release is
+# published. dux-repo queues these, so the last suite release is always seen.
+
+on:
+  workflow_run:
+    workflows: ["Create Release"]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  dispatch:
+    if: >-
+      github.repository_owner == 'duxlabs-dev' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      !contains(github.event.workflow_run.head_branch, '-')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create GitHub App token
+        id: app_token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: dux-repo
+
+      - name: Dispatch dux-repo
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          OWNER: ${{ github.repository_owner }}
+          REF: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${OWNER}/dux-repo/dispatches" \
+            -f event_type=suite-release \
+            -f "client_payload[ref]=$REF" \
+            -f "client_payload[source]=${{ github.repository }}"
+          echo "dispatched suite-release (${REF}) to ${OWNER}/dux-repo" >> "$GITHUB_STEP_SUMMARY"
