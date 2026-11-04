@@ -3,6 +3,7 @@
 package gops
 
 import (
+	"cmp"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -76,6 +77,11 @@ func distroName(path string) string {
 	return "Unknown"
 }
 
+const (
+	amdgpuIdsPath = "/usr/share/libdrm/amdgpu.ids"
+	udevDataRoot  = "/run/udev/data"
+)
+
 var (
 	scanGPUEntriesOnce sync.Once
 	scannedGPUEntries  []gpuEntry
@@ -122,7 +128,7 @@ func scanGPUEntries() ([]gpuEntry, error) {
 		deviceId := strings.TrimSpace(strings.TrimPrefix(string(deviceBytes), "0x"))
 		bdf := filepath.Base(devicePath)
 		driver := getGPUDriver(bdf)
-		displayName := lookupPCIDevice(vendorId, deviceId)
+		displayName := gpuName(devicePath, vendorId, deviceId)
 		vendor := inferVendorFromId(vendorId, driver)
 		priority := getPriority(driver, bdf)
 		pciId := fmt.Sprintf("%s:%s", vendorId, deviceId)
@@ -147,6 +153,44 @@ func scanGPUEntries() ([]gpuEntry, error) {
 	return gpuEntries, nil
 }
 
+// amdgpu.ids goes first because it tells apart the cards pci.ids lists as one family.
+func gpuName(dev, vendorId, deviceId string) string {
+	name := ""
+	if vendorId == "1002" {
+		name = lookupAMDGPUName(amdgpuIdsPath, deviceId, readTrimmed(filepath.Join(dev, "revision")))
+	}
+	return cmp.Or(name, lookupPCIDevice(vendorId, deviceId), lookupUdevModel(udevDataRoot, filepath.Base(dev)), fmt.Sprintf("GPU %s:%s", vendorId, deviceId))
+}
+
+func lookupAMDGPUName(path, deviceId, revision string) string {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+
+	want := strings.ToUpper(deviceId + ",\t" + strings.TrimPrefix(revision, "0x") + ",\t")
+	for line := range strings.SplitSeq(string(content), "\n") {
+		if name, ok := strings.CutPrefix(line, want); ok {
+			return strings.TrimSpace(name)
+		}
+	}
+	return ""
+}
+
+func lookupUdevModel(root, bdf string) string {
+	content, err := os.ReadFile(filepath.Join(root, "+pci:"+bdf))
+	if err != nil {
+		return ""
+	}
+
+	for line := range strings.SplitSeq(string(content), "\n") {
+		if model, ok := strings.CutPrefix(line, "E:ID_MODEL_FROM_DATABASE="); ok {
+			return strings.TrimSpace(model)
+		}
+	}
+	return ""
+}
+
 func lookupPCIDevice(vendorId, deviceId string) string {
 	pciIdsPaths := []string{
 		"/usr/share/hwdata/pci.ids",
@@ -163,12 +207,12 @@ func lookupPCIDevice(vendorId, deviceId string) string {
 	}
 
 	if pciIdsPath == "" {
-		return fmt.Sprintf("GPU %s:%s", vendorId, deviceId)
+		return ""
 	}
 
 	content, err := os.ReadFile(pciIdsPath)
 	if err != nil {
-		return fmt.Sprintf("GPU %s:%s", vendorId, deviceId)
+		return ""
 	}
 
 	inVendor := false
@@ -192,7 +236,7 @@ func lookupPCIDevice(vendorId, deviceId string) string {
 		}
 	}
 
-	return fmt.Sprintf("GPU %s:%s", vendorId, deviceId)
+	return ""
 }
 
 func getGPUDriver(bdf string) string {
