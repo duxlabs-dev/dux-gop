@@ -197,7 +197,7 @@ func getPriority(driver, bdf string) int {
 
 var (
 	gpuPciIDRe        = regexp.MustCompile(`\[([0-9a-f]{4}:[0-9a-f]{4})\]`)
-	gpuClassPrefixRe  = regexp.MustCompile(`^[^:]+: `)
+	gpuClassPrefixRe  = regexp.MustCompile(`^(?:\S+ )?[^:]+: `)
 	gpuPciIDTailRe    = regexp.MustCompile(`\[[0-9a-f]{4}:[0-9a-f]{4}\].*$`)
 	gpuAfterBracketRe = regexp.MustCompile(`\]\s*([^\[]+)$`)
 	gpuLastBracketRe  = regexp.MustCompile(`\[([^\]]+)\]([^\[]*$)`)

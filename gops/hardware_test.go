@@ -71,20 +71,32 @@ func TestParseGPUInfo(t *testing.T) {
 		{
 			name:                "NVIDIA GPU",
 			rawLine:             "0000:01:00.0 Display controller: NVIDIA Corporation TU106 [GeForce RTX 2070] [10de:1f02]",
-			expectedDisplayName: "NVIDIA Corporation TU106 [GeForce RTX 2070]",
+			expectedDisplayName: "GeForce RTX 2070",
 			expectedPciId:       "10de:1f02",
 		},
 		{
 			name:                "AMD GPU",
 			rawLine:             "0000:03:00.0 VGA compatible controller: AMD/ATI Navi 10 [Radeon RX 5700] [1002:731f]",
-			expectedDisplayName: "AMD/ATI Navi 10 [Radeon RX 5700]",
+			expectedDisplayName: "Radeon RX 5700",
 			expectedPciId:       "1002:731f",
 		},
 		{
 			name:                "Intel GPU",
 			rawLine:             "0000:00:02.0 VGA compatible controller: Intel Corporation UHD Graphics 630 [8086:3e9b]",
-			expectedDisplayName: "Intel Corporation UHD Graphics 630",
+			expectedDisplayName: "UHD Graphics 630",
 			expectedPciId:       "8086:3e9b",
+		},
+		{
+			name:                "name from the bare id fallback",
+			rawLine:             "0000:00:02.0 Display controller: GPU 8086:591b [8086:591b]",
+			expectedDisplayName: "GPU 8086:591b",
+			expectedPciId:       "8086:591b",
+		},
+		{
+			name:                "exact AMD product name",
+			rawLine:             "0000:0c:00.0 Display controller: AMD Radeon RX 7900 XTX [1002:744c]",
+			expectedDisplayName: "Radeon RX 7900 XTX",
+			expectedPciId:       "1002:744c",
 		},
 		{
 			name:                "empty line",
@@ -98,11 +110,7 @@ func TestParseGPUInfo(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			displayName, pciId := parseGPUInfo(tt.rawLine)
 			assert.Equal(t, tt.expectedPciId, pciId)
-			if tt.rawLine != "" {
-				assert.NotEmpty(t, displayName)
-			} else {
-				assert.Equal(t, "Unknown", displayName)
-			}
+			assert.Equal(t, tt.expectedDisplayName, displayName)
 		})
 	}
 }
