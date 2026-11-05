@@ -22,9 +22,9 @@ type ProcessInfo struct {
 	Nice              *int    `json:"nice,omitempty"`
 
 	StartTime      int64    `json:"startTime,omitempty" doc:"Process start, unix seconds."`
-	GPU            *float64 `json:"gpu,omitempty" doc:"Percentage of the busiest GPU engine used since the cursor, in the range 0-100. Merged rows sum each member's busiest engine, capped at 100."`
+	GPU            *float64 `json:"gpu,omitempty" doc:"Percentage of the busiest GPU engine used since the cursor, in the range 0-100. On NVIDIA GPUs the busiest SM share in nvidia-smi pmon's latest sample, so it needs no cursor. Merged rows sum each member's busiest engine, capped at 100."`
 	VRAMKB         *uint64  `json:"vramKB,omitempty" doc:"GPU memory in KB."`
-	GPUVideo       *float64 `json:"gpuVideo,omitempty" doc:"Percentage of the busiest video engine (encode, decode, JPEG) used since the cursor. Merged rows sum each member's busiest video engine, capped at 100."`
+	GPUVideo       *float64 `json:"gpuVideo,omitempty" doc:"Percentage of the busiest video engine (encode, decode, JPEG) used since the cursor; on NVIDIA GPUs from nvidia-smi pmon's latest sample. Merged rows sum each member's busiest video engine, capped at 100."`
 	GPUGttKB       *uint64  `json:"gpuGttKB,omitempty" doc:"System memory mapped for the GPU (GTT), in KB."`
 	GPUUnmonitored bool     `json:"gpuUnmonitored,omitempty" doc:"True when the process holds a GPU that is excluded, or an NVIDIA GPU that is excluded or suspended, so gpu and vramKB are deliberately not measured."`
 	DiskRead       *float64 `json:"diskRead,omitempty" doc:"Disk bytes read per second since the cursor."`

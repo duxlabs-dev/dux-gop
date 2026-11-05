@@ -573,12 +573,19 @@ func setProcessExtras(info *models.ProcessInfo, prev, cur *processSample, gpu pr
 		info.VRAMKB = new(gpu.VRAMBytes / 1024)
 		info.GPUGttKB = new(gpu.GTTBytes / 1024)
 	}
+	// pmon averages over its own sample, so it needs no previous one.
+	if gpu.Nvidia != nil && gpu.UsageKnown && !gpu.Unmonitored {
+		info.GPU, info.GPUVideo = new(gpu.Nvidia.SM), new(gpu.Nvidia.Video)
+	}
 	if prev == nil || cur.Timestamp <= prev.Timestamp {
 		return
 	}
 	elapsed := time.Duration(cur.Timestamp-prev.Timestamp) * time.Millisecond
 	if cur.gpuOK && prev.gpuOK && !gpu.Unmonitored {
 		usage, video := procGPUUsage(prev.gpu, gpu.Clients, elapsed)
+		if gpu.Nvidia != nil {
+			usage, video = max(usage, gpu.Nvidia.SM), max(video, gpu.Nvidia.Video)
+		}
 		info.GPU, info.GPUVideo = &usage, &video
 	}
 	if cur.ioOK && prev.ioOK && cur.io[0] >= prev.io[0] && cur.io[1] >= prev.io[1] {

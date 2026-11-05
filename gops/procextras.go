@@ -2,7 +2,8 @@ package gops
 
 // procGPU is one process's GPU readings. Readable false means everything is
 // unknown. UsageKnown false means a percentage can't be derived (a driver
-// without engine data, NVIDIA, or a GPU we don't classify), so only VRAM is as read.
+// without engine data, NVIDIA without nvidia-smi pmon, or a GPU we don't
+// classify), so only VRAM is as read.
 type procGPU struct {
 	Readable bool
 	// Unmonitored: unknown because the process holds a GPU that is not queried.
@@ -12,6 +13,16 @@ type procGPU struct {
 	GTTBytes    uint64
 	// Clients that report engines, for rating.
 	Clients drmClientSet
+	// Nvidia is the process's share of the NVIDIA GPUs from nvidia-smi pmon,
+	// set only when it is known.
+	Nvidia *nvidiaUsage
+}
+
+// nvidiaUsage is a process's busiest SM and video (encode, decode, JPEG)
+// percentage in nvidia-smi pmon's latest sample, the highest across GPUs.
+type nvidiaUsage struct {
+	SM    float64
+	Video float64
 }
 
 type gpuCursorClient struct {
