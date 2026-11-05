@@ -99,26 +99,33 @@ func TestBuildProcGPUReader_AllowList(t *testing.T) {
 		{BusId: "0000:0c:00.0", PciId: "1002:744c", Driver: "amdgpu"},
 		{BusId: "0000:01:00.0", PciId: "10de:2786", Driver: "nvidia"},
 	}
-	smi := 0
-	var queried []string
-	query := func(ids []string) map[int32]uint64 { smi++; queried = ids; return map[int32]uint64{} }
+	smi, pmon := 0, 0
+	var queried, pmonQueried []string
+	query := nvidiaQueries{
+		pids: func(ids []string) map[int32]uint64 { smi++; queried = ids; return map[int32]uint64{} },
+		pmon: func(ids []string) map[int32]nvidiaUsage { pmon++; pmonQueried = ids; return nil },
+	}
 
 	r := buildProcGPUReader(pciRoot, detected, []string{"1002:744c", "10de:2786"}, query)
 	assert.Equal(t, map[string]gpuNodeState{"renderD128": gpuNodeRead, "renderD129": gpuNodeRead}, r.nodes)
 	assert.Equal(t, 1, smi)
 	assert.Equal(t, []string{"0000:01:00.0"}, queried)
+	assert.Equal(t, 1, pmon)
+	assert.Equal(t, []string{"0000:01:00.0"}, pmonQueried)
 
-	smi = 0
+	smi, pmon = 0, 0
 	for _, ids := range [][]string{nil, {}} {
 		r = buildProcGPUReader(pciRoot, detected, ids, query)
 		assert.Equal(t, map[string]gpuNodeState{"renderD128": gpuNodeExcluded, "renderD129": gpuNodeExcluded}, r.nodes, "omitted or empty reads no GPU")
 	}
 	assert.Equal(t, 0, smi)
+	assert.Equal(t, 0, pmon)
 
 	r = buildProcGPUReader(pciRoot, detected, []string{"1002:744c"}, query)
 	assert.Equal(t, map[string]gpuNodeState{"renderD128": gpuNodeRead, "renderD129": gpuNodeExcluded}, r.nodes)
 	assert.Empty(t, r.nvidia)
 	assert.Equal(t, 0, smi, "nvidia-smi must not run when no NVIDIA GPU is enabled")
+	assert.Equal(t, 0, pmon)
 
 	r = buildProcGPUReader(pciRoot, detected, []string{"10de:2786"}, query)
 	assert.Equal(t, map[string]gpuNodeState{"renderD128": gpuNodeExcluded, "renderD129": gpuNodeRead}, r.nodes)
@@ -143,7 +150,7 @@ func TestProcGPUReader_ExcludedGPUIsUnknown(t *testing.T) {
 	writeFDLink(t, procRoot, 4, 3, "/dev/dri/card1")
 
 	read := func(ids []string, pid int32) procGPU {
-		return readGPU(buildProcGPUReader(pciRoot, detected, ids, func([]string) map[int32]uint64 { return nil }), procRoot, pid)
+		return readGPU(buildProcGPUReader(pciRoot, detected, ids, noNvidiaSmi), procRoot, pid)
 	}
 	dGPU := []string{"1002:744c"}
 
@@ -178,7 +185,7 @@ func TestProcGPUReader_SuspendedGPUIsIdle(t *testing.T) {
 	require.NoError(t, os.Remove(fdinfo))
 	require.NoError(t, os.Mkdir(fdinfo, 0o755))
 	detected := []models.GPU{{BusId: slot, PciId: "1002:744c", Driver: "amdgpu"}}
-	r := buildProcGPUReader(pciRoot, detected, []string{"1002:744c"}, func([]string) map[int32]uint64 { return nil })
+	r := buildProcGPUReader(pciRoot, detected, []string{"1002:744c"}, noNvidiaSmi)
 	assert.Equal(t, procGPU{Readable: true, UsageKnown: true}, readGPU(r, procRoot, 1), "a runtime-suspended GPU is idle: 0, not unknown")
 }
 
@@ -227,10 +234,91 @@ func TestBuildProcGPUReader_NvidiaQueriesOnlyActiveCards(t *testing.T) {
 		{BusId: "0000:02:00.0", PciId: "10de:2786", Driver: "nvidia"},
 		{BusId: "0000:03:00.0", PciId: "10de:1234", Driver: "nvidia"},
 	}
-	var queried []string
-	buildProcGPUReader(pciRoot, detected, []string{"10de:2786"}, func(ids []string) map[int32]uint64 {
-		queried = ids
-		return map[int32]uint64{}
+	var queried, pmonQueried []string
+	buildProcGPUReader(pciRoot, detected, []string{"10de:2786"}, nvidiaQueries{
+		pids: func(ids []string) map[int32]uint64 { queried = ids; return map[int32]uint64{} },
+		pmon: func(ids []string) map[int32]nvidiaUsage { pmonQueried = ids; return map[int32]nvidiaUsage{} },
 	})
 	assert.Equal(t, []string{"0000:01:00.0"}, queried, "suspended and excluded NVIDIA GPUs are not queried")
+	assert.Equal(t, []string{"0000:01:00.0"}, pmonQueried, "pmon samples the same GPUs only")
+}
+
+var noNvidiaSmi = nvidiaQueries{
+	pids: func([]string) map[int32]uint64 { return nil },
+	pmon: func([]string) map[int32]nvidiaUsage { return nil },
+}
+
+func TestBuildProcGPUReader_PmonNeedsPIDs(t *testing.T) {
+	pciRoot := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(pciRoot, "0000:01:00.0"), 0o755))
+	detected := []models.GPU{{BusId: "0000:01:00.0", PciId: "10de:2786", Driver: "nvidia"}}
+	pmon := 0
+	r := buildProcGPUReader(pciRoot, detected, []string{"10de:2786"}, nvidiaQueries{
+		pids: func([]string) map[int32]uint64 { return nil },
+		pmon: func([]string) map[int32]nvidiaUsage { pmon++; return map[int32]nvidiaUsage{} },
+	})
+	assert.Equal(t, 0, pmon, "without VRAM an NVIDIA process stays unknown, so pmon is not worth a run")
+	assert.Nil(t, r.nvidiaUsage)
+}
+
+func TestProcGPUReader_NvidiaUsageFromPmon(t *testing.T) {
+	procRoot := t.TempDir()
+	nodes := map[string]gpuNodeState{"renderD128": gpuNodeRead, "renderD129": gpuNodeRead}
+	// pid 4: nvidia-drm client (Wayland compositor or game on the dGPU).
+	writeDRMClient(t, procRoot, 4, 3, "renderD129", "drm-driver:\tnvidia-drm\ndrm-client-id:\t1\ndrm-pdev:\t0000:01:00.0\n")
+	// pid 5: CUDA process, only /dev/nvidia* fds.
+	writeFDLink(t, procRoot, 5, 3, "/dev/nvidiactl")
+	writeFDLink(t, procRoot, 5, 4, "/dev/nvidia0")
+	// pid 7: nvidiactl alone is not a GPU.
+	writeFDLink(t, procRoot, 7, 3, "/dev/nvidiactl")
+	// pid 8: hybrid, nvidia fd plus an iGPU engine client.
+	writeDRMClient(t, procRoot, 8, 4, "renderD128", amdgpuEngineClient)
+	writeFDLink(t, procRoot, 8, 5, "/dev/nvidia0")
+	// pid 9: nvidia fd, idle, so pmon does not list it.
+	writeFDLink(t, procRoot, 9, 3, "/dev/nvidia0")
+
+	r := &procGPUReader{gpuNodeSet: gpuNodeSet{nodes: nodes, nvidia: []string{"0000:01:00.0"}},
+		nvidiaVRAM:  map[int32]uint64{4: 100, 5: 200},
+		nvidiaUsage: map[int32]nvidiaUsage{4: {SM: 30, Video: 5}, 5: {SM: 80}, 8: {SM: 12}}}
+	read := func(pid int32) procGPU { return readGPU(r, procRoot, pid) }
+
+	assert.Equal(t, procGPU{Readable: true, UsageKnown: true, VRAMBytes: 100, Nvidia: &nvidiaUsage{SM: 30, Video: 5}}, read(4))
+	assert.Equal(t, procGPU{Readable: true, UsageKnown: true, VRAMBytes: 200, Nvidia: &nvidiaUsage{SM: 80}}, read(5))
+	assert.Equal(t, procGPU{Readable: true, UsageKnown: true}, read(7))
+	h := read(8)
+	assert.True(t, h.UsageKnown, "hybrid: pmon covers the dGPU share")
+	assert.Len(t, h.Clients, 1, "iGPU client is still rated")
+	assert.Equal(t, &nvidiaUsage{SM: 12}, h.Nvidia)
+	assert.Equal(t, procGPU{Readable: true, UsageKnown: true, Nvidia: &nvidiaUsage{}}, read(9), "not listed by pmon is 0%, not unknown")
+}
+
+func TestSetProcessExtras_NvidiaUsage(t *testing.T) {
+	var info models.ProcessInfo
+	gpu := procGPU{Readable: true, UsageKnown: true, Nvidia: &nvidiaUsage{SM: 40, Video: 7}}
+	setProcessExtras(&info, nil, &processSample{}, gpu)
+	require.NotNil(t, info.GPU)
+	assert.Equal(t, 40.0, *info.GPU, "pmon needs no previous sample")
+	assert.Equal(t, 7.0, *info.GPUVideo)
+
+	// Hybrid: the busier of the iGPU engines (50% render here) and the dGPU share.
+	prevClient := gpuCursorClient{PDev: "0000:00:02.0", ID: 1, Engines: map[string][3]uint64{"render": {0, 0, 0}, "video": {0, 0, 0}}}
+	cur, ok := parseDRMFdinfo(i915Client(1, 500_000_000, 100_000_000))
+	require.True(t, ok)
+	prev := &processSample{ProcessCursorData: models.ProcessCursorData{Timestamp: 1000}, gpuOK: true, gpu: []gpuCursorClient{prevClient}}
+	now := &processSample{ProcessCursorData: models.ProcessCursorData{Timestamp: 2000}, gpuOK: true}
+	gpu.Clients = drmClientSet{cur.key(): cur}
+	info = models.ProcessInfo{}
+	setProcessExtras(&info, prev, now, gpu)
+	assert.InDelta(t, 50.0, *info.GPU, 0.01)
+	assert.InDelta(t, 10.0, *info.GPUVideo, 0.01)
+
+	gpu.Nvidia = &nvidiaUsage{SM: 90, Video: 3}
+	info = models.ProcessInfo{}
+	setProcessExtras(&info, prev, now, gpu)
+	assert.Equal(t, 90.0, *info.GPU)
+	assert.InDelta(t, 10.0, *info.GPUVideo, 0.01)
+
+	info = models.ProcessInfo{}
+	setProcessExtras(&info, prev, now, procGPU{Unmonitored: true, Nvidia: &nvidiaUsage{SM: 90}})
+	assert.Nil(t, info.GPU, "unmonitored stays unknown")
 }

@@ -12,18 +12,30 @@ type procGPUReader struct {
 	gpuNodeSet
 	// VRAM bytes per process listed by nvidia-smi; nil when the query failed.
 	nvidiaVRAM map[int32]uint64
+	// Usage per process from nvidia-smi pmon, which lists only processes
+	// with work on the GPUs; nil when pmon failed or is unsupported.
+	nvidiaUsage map[int32]nvidiaUsage
+}
+
+// nvidiaQueries are the nvidia-smi reads; both take the bus ids of the named, awake NVIDIA GPUs.
+type nvidiaQueries struct {
+	pids func(busIds []string) map[int32]uint64
+	pmon func(busIds []string) map[int32]nvidiaUsage
 }
 
 // newProcGPUReader reads only the GPUs named in pciIds, and runs nvidia-smi only for named, awake NVIDIA ones.
 func (self *GopsUtil) newProcGPUReader(pciIds []string) *procGPUReader {
 	entries, _ := self.detectGPUEntries()
-	return buildProcGPUReader(pciDevicesRoot, gpusFromEntries(entries), pciIds, queryNvidiaPIDs)
+	return buildProcGPUReader(pciDevicesRoot, gpusFromEntries(entries), pciIds, nvidiaQueries{pids: queryNvidiaPIDs, pmon: queryNvidiaPmon})
 }
 
-func buildProcGPUReader(pciRoot string, detected []models.GPU, pciIds []string, nvidiaPIDs func(busIds []string) map[int32]uint64) *procGPUReader {
+func buildProcGPUReader(pciRoot string, detected []models.GPU, pciIds []string, nvidia nvidiaQueries) *procGPUReader {
 	r := &procGPUReader{gpuNodeSet: gpuNodes(pciRoot, detected, pciIds)}
 	if len(r.nvidia) > 0 {
-		r.nvidiaVRAM = nvidiaPIDs(r.nvidia)
+		r.nvidiaVRAM = nvidia.pids(r.nvidia)
+		if r.nvidiaVRAM != nil {
+			r.nvidiaUsage = nvidia.pmon(r.nvidia)
+		}
 	}
 	return r
 }
@@ -36,11 +48,19 @@ func (self *procGPUReader) fromScan(pid int32, scan procFDScan) procGPU {
 		return procGPU{}
 	}
 	vram, listed := self.nvidiaVRAM[pid]
+	usage, active := self.nvidiaUsage[pid]
+	nvidiaProc := scan.NvidiaGPU || listed || active
+	// pmon gives the NVIDIA share, so the nvidia-drm clients need no engine data.
+	pmonKnown := nvidiaProc && self.nvidiaUsage != nil
 	res := procGPU{Readable: true, VRAMBytes: vram}
+	uncovered := 0
 	for key, client := range scan.DRM {
 		res.VRAMBytes += client.VRAMBytes
 		res.GTTBytes += client.GTTBytes
 		if !drmDriverReportsEngines(client.Driver) {
+			if !pmonKnown || client.Driver != "nvidia-drm" {
+				uncovered++
+			}
 			continue
 		}
 		if res.Clients == nil {
@@ -48,10 +68,13 @@ func (self *procGPUReader) fromScan(pid int32, scan procFDScan) procGPU {
 		}
 		res.Clients[key] = client
 	}
-	// An NVIDIA process is never known: on a hybrid laptop its DRM clients
-	// would show only the integrated GPU's share.
-	nvidiaProc := scan.NvidiaGPU || listed
-	res.UsageKnown = !nvidiaProc && !scan.UnknownGPU && (len(res.Clients) > 0 || len(scan.DRM) == 0)
+	// Without pmon an NVIDIA process is never known: on a hybrid laptop its
+	// DRM clients would show only the integrated GPU's share. A process pmon
+	// does not list has no work on the NVIDIA GPUs.
+	if pmonKnown {
+		res.Nvidia = &usage
+	}
+	res.UsageKnown = (!nvidiaProc || pmonKnown) && !scan.UnknownGPU && (len(res.Clients) > 0 || uncovered == 0)
 	return res
 }
 
