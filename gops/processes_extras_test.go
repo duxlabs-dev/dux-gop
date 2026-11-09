@@ -44,7 +44,7 @@ func TestProcessCursor_Extras(t *testing.T) {
 func TestMergeProcesses_Extras(t *testing.T) {
 	merge := func(rows ...*models.ProcessInfo) map[int32]*models.ProcessInfo {
 		out := map[int32]*models.ProcessInfo{}
-		for _, p := range mergeProcessesByExecutable(rows) {
+		for _, p := range mergeProcessesByExecutable(rows, false) {
 			out[p.PID] = p
 		}
 		return out
@@ -106,6 +106,21 @@ func TestMergeProcesses_Extras(t *testing.T) {
 		assert.Nil(t, known.NetTx, "the child's unknown tx makes the sum unknown")
 		assert.Equal(t, 30, *parent.Connections, "the original rows must not be written through")
 		assert.Equal(t, models.NetConnection{}, parent.Remotes[:31][30], "the parent's spare capacity must not be appended into")
+	})
+
+	t.Run("members list the root first with its own values", func(t *testing.T) {
+		child := &models.ProcessInfo{PID: 2, PPID: 1, ExecutablePath: "/bin/a", CPU: 3}
+		parent := &models.ProcessInfo{PID: 1, ExecutablePath: "/bin/a", CPU: 1}
+		lone := &models.ProcessInfo{PID: 9, ExecutablePath: "/bin/b"}
+		out := map[int32]*models.ProcessInfo{}
+		for _, p := range mergeProcessesByExecutable([]*models.ProcessInfo{child, parent, lone}, true) {
+			out[p.PID] = p
+		}
+		assert.Equal(t, []*models.ProcessInfo{parent, child}, out[1].Children)
+		assert.Equal(t, 4.0, out[1].CPU)
+		assert.Equal(t, 1.0, parent.CPU)
+		assert.Nil(t, out[9].Children, "an unmerged row has no members")
+		assert.Nil(t, merge(parent, child)[1].Children, "only listed when asked")
 	})
 }
 

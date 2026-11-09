@@ -151,11 +151,14 @@ dgop processes --no-cpu
 # Add per-process GPU and VRAM (of the named GPUs), disk I/O, or connections and TCP rates
 dgop processes --gpu --gpu-pci-ids 10de:2684 --io --net
 
+# List the processes behind each merged row (JSON output)
+dgop processes --members --json
+
 # Combine options
 dgop meta --modules processes --sort memory --limit 20 --no-cpu
 
 # Per-process extras in meta
-dgop meta --modules processes,process-gpu,process-io,process-net --gpu-pci-ids 10de:2684 --sort disk
+dgop meta --modules processes,process-gpu,process-io,process-net,process-members --gpu-pci-ids 10de:2684 --sort disk
 ```
 
 ## API Server

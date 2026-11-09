@@ -12,7 +12,7 @@ func TestGetMetaModules(t *testing.T) {
 	g := NewGopsUtilWithProviders(nil, nil, nil, nil, nil, nil, nil, nil)
 	mods, err := g.GetModules()
 	require.NoError(t, err)
-	assert.Subset(t, mods.Available, []string{"sensors", "memory-modules", "process-gpu", "process-io", "process-net"})
+	assert.Subset(t, mods.Available, []string{"sensors", "memory-modules", "process-gpu", "process-io", "process-net", "process-members"})
 
 	for _, bad := range [][]string{{"nope"}, {"process-io", "nope"}} {
 		_, err := g.GetMeta(context.Background(), bad, MetaParams{})

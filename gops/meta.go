@@ -23,6 +23,7 @@ var availableModules = []string{
 	"process-gpu",
 	"process-io",
 	"process-net",
+	"process-members",
 	"system",
 	"hardware",
 	"gpu",
@@ -56,7 +57,7 @@ type MetaParams struct {
 }
 
 // processOptions builds the process query, enabling the extras requested by
-// the process-gpu, process-io and process-net modifier modules.
+// the process-gpu, process-io, process-net and process-members modifier modules.
 func (p MetaParams) processOptions(modules []string) (opts ProcessOptions, modifier bool) {
 	opts = ProcessOptions{SortBy: p.SortBy, Limit: p.ProcLimit, EnableCPU: p.EnableCPU, Cursor: p.ProcCursor, MergeChildren: p.MergeChildren, GPUPciIds: p.GPUPciIds}
 	for _, m := range modules {
@@ -67,6 +68,8 @@ func (p MetaParams) processOptions(modules []string) (opts ProcessOptions, modif
 			opts.IO, modifier = true, true
 		case "process-net":
 			opts.Net, modifier = true, true
+		case "process-members":
+			opts.Members, modifier = true, true
 		}
 	}
 	return opts, modifier
@@ -111,7 +114,7 @@ func (self *GopsUtil) GetMeta(ctx context.Context, modules []string, params Meta
 			}
 		case "processes":
 			hasProcesses = true
-		case "process-gpu", "process-io", "process-net":
+		case "process-gpu", "process-io", "process-net", "process-members":
 		case "system":
 			if sys, err := self.GetSystemInfo(); err == nil {
 				meta.System = sys
