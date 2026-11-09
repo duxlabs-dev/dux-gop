@@ -297,7 +297,9 @@ type ProcessOptions struct {
 	EnableCPU     bool
 	Cursor        string
 	MergeChildren bool
-	GPU           bool
+	// Members lists each merged row's processes, root first, in Children.
+	Members bool
+	GPU     bool
 	// GPUPciIds names the GPUs to read; empty reads none.
 	GPUPciIds []string
 	IO        bool
@@ -550,7 +552,7 @@ func (self *GopsUtil) GetProcessesWithOptions(opts ProcessOptions) (*models.Proc
 	}
 
 	if mergeChildren {
-		procList = mergeProcessesByExecutable(procList)
+		procList = mergeProcessesByExecutable(procList, opts.Members)
 	}
 
 	sortProcesses(procList, opts.effectiveSort())
@@ -795,7 +797,7 @@ func findMergeRoot(p *models.ProcessInfo, pidMap map[int32]*models.ProcessInfo) 
 	}
 }
 
-func mergeProcessesByExecutable(procList []*models.ProcessInfo) []*models.ProcessInfo {
+func mergeProcessesByExecutable(procList []*models.ProcessInfo, members bool) []*models.ProcessInfo {
 	pidMap := make(map[int32]*models.ProcessInfo)
 	for _, p := range procList {
 		pidMap[p.PID] = p
@@ -814,6 +816,9 @@ func mergeProcessesByExecutable(procList []*models.ProcessInfo) []*models.Proces
 		if root == nil {
 			clone := *pidMap[rootPID]
 			clone.ChildCount = 0
+			if members {
+				clone.Children = []*models.ProcessInfo{pidMap[rootPID]}
+			}
 			rootProcs[rootPID] = &clone
 			root = rootProcs[rootPID]
 		}
@@ -851,11 +856,17 @@ func mergeProcessesByExecutable(procList []*models.ProcessInfo) []*models.Proces
 			}
 			root.Threads += p.Threads
 			root.ChildCount++
+			if members {
+				root.Children = append(root.Children, p)
+			}
 		}
 	}
 
 	result := make([]*models.ProcessInfo, 0, len(rootProcs))
 	for _, p := range rootProcs {
+		if p.ChildCount == 0 {
+			p.Children = nil
+		}
 		result = append(result, p)
 	}
 	return result

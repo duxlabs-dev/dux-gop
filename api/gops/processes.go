@@ -18,6 +18,7 @@ type ProcessInput struct {
 	GPU            bool            `query:"gpu" default:"false"`
 	IO             bool            `query:"io" default:"false"`
 	Net            bool            `query:"net" default:"false"`
+	Members        bool            `query:"members" default:"false" doc:"With merge_children, list each merged row's processes in children"`
 	GPUPciIds      []string        `query:"gpu_pci_ids" example:"10de:2684" doc:"With gpu, the GPUs to read; other GPUs are not touched"`
 }
 
@@ -34,7 +35,7 @@ func (self *HandlerGroup) Processes(ctx context.Context, input *ProcessInput) (*
 
 	result, err := self.srv.Gops.GetProcessesWithOptions(gops.ProcessOptions{
 		SortBy: input.SortBy, Limit: input.Limit, EnableCPU: enableCPU, Cursor: input.Cursor,
-		MergeChildren: input.MergeChildren, GPU: input.GPU, GPUPciIds: input.GPUPciIds, IO: input.IO, Net: input.Net,
+		MergeChildren: input.MergeChildren, GPU: input.GPU, GPUPciIds: input.GPUPciIds, IO: input.IO, Net: input.Net, Members: input.Members,
 	})
 	if err != nil {
 		log.Error("Error getting process info")

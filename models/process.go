@@ -36,6 +36,8 @@ type ProcessInfo struct {
 	NetRx            *float64        `json:"netRx,omitempty" doc:"TCP payload bytes per second received from internet and local remotes since the cursor. Absent when unknown: unreadable fds, a container's own network namespace, or only UDP sockets, which have no byte counters."`
 	NetTx            *float64        `json:"netTx,omitempty" doc:"TCP payload bytes per second sent and acknowledged, like netRx."`
 	NetPartial       bool            `json:"netPartial,omitempty" doc:"True when UDP sockets (e.g. QUIC) to internet or local remotes are open too; netRx and netTx leave them out, so they are a lower bound."`
+
+	Children []*ProcessInfo `json:"children,omitempty" doc:"With members requested, the processes of a merged row, root first, each with its own values."`
 }
 
 type NetConnection struct {

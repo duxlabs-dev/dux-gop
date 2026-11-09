@@ -219,7 +219,7 @@ func runProcessesCommand(gopsUtil *gops.GopsUtil) error {
 
 	result, err := gopsUtil.GetProcessesWithOptions(gops.ProcessOptions{
 		SortBy: sortBy, Limit: procLimit, EnableCPU: enableCPU, Cursor: procCursor,
-		MergeChildren: mergeChildren, GPU: procGPU, GPUPciIds: metaGPUPciIds, IO: procIO, Net: procNet,
+		MergeChildren: mergeChildren, GPU: procGPU, GPUPciIds: metaGPUPciIds, IO: procIO, Net: procNet, Members: procMembers,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to get processes: %w", err)
