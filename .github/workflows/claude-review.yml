@@ -110,6 +110,7 @@ jobs:
                ## Claude review
                <one line verdict>
                - <finding, file:line> per inline comment posted this run
+               Docs pending: <items>, only when the PR adds or changes an IPC function, CLI flag or setting and links no dux-docs PR
                Checked: <one line>. Model: claude-opus-5-5.
 
                No findings: "No issues found." plus what was checked.
@@ -117,10 +118,11 @@ jobs:
             Flag only issues introduced by this PR:
             - Bugs: wrong logic, crashes, nil/undefined access, races, leaks (timers, connections, processes, handles), bad Go error handling, edge cases that will clearly be hit.
             - Security: command injection, path traversal, unsafe file permissions, secrets in code.
+            - Contract drift: the same rule implemented in two places (CLI and API, client and server) that can disagree, and IPC/CLI/API calls that report success before an async step decides the outcome.
             - Project rules: gofmt -s clean, golangci-lint clean, CGO stays disabled, non-critical errors degrade gracefully instead of aborting; gopsutil collectors keep one metric per file; API handlers in api/ wrap gops collectors, no logic duplicated between CLI and API.
             - Go: unformatted code, go.mod/go.sum out of sync with imports, tests that no longer compile.
 
-            Don't flag style or naming, pre-existing issues, anything a linter or compiler catches, speculative input-dependent problems, missing tests or docs, or refactor ideas. Not sure it's real: don't post it.
+            Don't flag naming, pre-existing issues, anything a linter or compiler catches, problems that need unusual input to trigger, or missing tests. Deterministic mismatches are not speculative. Not sure it's real: don't post it.
 
             Review only. Never edit files, commit, push, approve or request changes. Post each finding once. Keep comments short.
           claude_args: |
