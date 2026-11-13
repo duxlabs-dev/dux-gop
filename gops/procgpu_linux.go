@@ -54,9 +54,16 @@ func (self *procGPUReader) fromScan(pid int32, scan procFDScan) procGPU {
 	pmonKnown := nvidiaProc && self.nvidiaUsage != nil
 	res := procGPU{Readable: true, VRAMBytes: vram}
 	uncovered := 0
+	// Clients of one process on one device each report the buffers they share,
+	// and fdinfo can't tell which: count the largest share once, a lower bound
+	// when the clients share different buffers.
+	type shared struct{ vram, gtt uint64 }
+	sharedByDev := map[string]shared{}
 	for key, client := range scan.DRM {
-		res.VRAMBytes += client.VRAMBytes
-		res.GTTBytes += client.GTTBytes
+		res.VRAMBytes += client.VRAMBytes - client.SharedVRAMBytes
+		res.GTTBytes += client.GTTBytes - client.SharedGTTBytes
+		s := sharedByDev[client.PDev]
+		sharedByDev[client.PDev] = shared{max(s.vram, client.SharedVRAMBytes), max(s.gtt, client.SharedGTTBytes)}
 		if !drmDriverReportsEngines(client.Driver) {
 			if !pmonKnown || client.Driver != "nvidia-drm" {
 				uncovered++
@@ -67,6 +74,10 @@ func (self *procGPUReader) fromScan(pid int32, scan procFDScan) procGPU {
 			res.Clients = drmClientSet{}
 		}
 		res.Clients[key] = client
+	}
+	for _, s := range sharedByDev {
+		res.VRAMBytes += s.vram
+		res.GTTBytes += s.gtt
 	}
 	// Without pmon an NVIDIA process is never known: on a hybrid laptop its
 	// DRM clients would show only the integrated GPU's share. A process pmon
