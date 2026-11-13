@@ -322,3 +322,23 @@ func TestSetProcessExtras_NvidiaUsage(t *testing.T) {
 	setProcessExtras(&info, prev, now, procGPU{Unmonitored: true, Nvidia: &nvidiaUsage{SM: 90}})
 	assert.Nil(t, info.GPU, "unmonitored stays unknown")
 }
+
+func TestProcGPUReader_SharedBuffersCountOnce(t *testing.T) {
+	procRoot := t.TempDir()
+	nodes := map[string]gpuNodeState{"renderD128": gpuNodeRead, "renderD129": gpuNodeRead}
+	client := func(id, pdev string, resident, shared int) string {
+		return "drm-driver:\tamdgpu\ndrm-client-id:\t" + id + "\ndrm-pdev:\t" + pdev +
+			"\ndrm-resident-vram:\t" + itoa(resident) + " KiB\ndrm-shared-vram:\t" + itoa(shared) +
+			" KiB\ndrm-resident-gtt:\t" + itoa(resident) + " KiB\ndrm-shared-gtt:\t" + itoa(shared) + " KiB\n"
+	}
+	// A second render context sees the buffers it shares with the first.
+	writeDRMClient(t, procRoot, 1, 4, "renderD128", client("7", "0000:0c:00.0", 3000, 1000))
+	writeDRMClient(t, procRoot, 1, 5, "renderD128", client("8", "0000:0c:00.0", 1000, 1000))
+	// Another device counts on its own.
+	writeDRMClient(t, procRoot, 1, 6, "renderD129", client("9", "0000:0d:00.0", 500, 200))
+
+	r := &procGPUReader{gpuNodeSet: gpuNodeSet{nodes: nodes}}
+	g := readGPU(r, procRoot, 1)
+	assert.Equal(t, uint64(3500<<10), g.VRAMBytes)
+	assert.Equal(t, uint64(3500<<10), g.GTTBytes)
+}

@@ -24,6 +24,10 @@ type drmClient struct {
 	Engines   map[string]drmEngine
 	VRAMBytes uint64
 	GTTBytes  uint64
+	// The part of the resident bytes in buffers shared with other clients:
+	// another context of the same process, or the compositor.
+	SharedVRAMBytes uint64
+	SharedGTTBytes  uint64
 }
 
 type drmClientKey struct {
@@ -44,7 +48,7 @@ func drmDriverReportsEngines(driver string) bool {
 func parseDRMFdinfo(text string) (drmClient, bool) {
 	client := drmClient{Engines: map[string]drmEngine{}}
 	hasID := false
-	var vram, legacyVRAM, gtt, legacyGTT uint64
+	var vram, legacyVRAM, gtt, legacyGTT, sharedVRAM, sharedGTT uint64
 	hasVRAM, hasGTT := false, false
 
 	engine := func(name string) drmEngine {
@@ -110,6 +114,10 @@ func parseDRMFdinfo(text string) (drmClient, bool) {
 		case strings.HasPrefix(key, "drm-resident-vram"), strings.HasPrefix(key, "drm-resident-local"):
 			vram += n
 			hasVRAM = true
+		case strings.HasPrefix(key, "drm-shared-vram"), strings.HasPrefix(key, "drm-shared-local"):
+			sharedVRAM += n
+		case key == "drm-shared-gtt":
+			sharedGTT += n
 		case key == "drm-memory-vram":
 			legacyVRAM = n
 		case key == "drm-resident-gtt":
@@ -132,6 +140,8 @@ func parseDRMFdinfo(text string) (drmClient, bool) {
 	} else {
 		client.GTTBytes = legacyGTT
 	}
+	client.SharedVRAMBytes = min(sharedVRAM, client.VRAMBytes)
+	client.SharedGTTBytes = min(sharedGTT, client.GTTBytes)
 	return client, true
 }
 
